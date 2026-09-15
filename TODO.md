@@ -43,7 +43,6 @@ deleting history, so it stays a running log.
       triggers), all 4 containers stayed healthy, ingestion confirmed idempotent
       on re-run, dedup stable, 404s and query-param clamping verified correct.
       See `errors.md` sections 4-5.
-
 - [x] Fixed the `run_date` validation bug: `trigger_ranking_selection()` now
       validates with `date.fromisoformat()` and returns HTTP 422 with a clear
       message on bad input, instead of silently queuing a task that fails in
