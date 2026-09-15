@@ -1,0 +1,139 @@
+from datetime import datetime, timezone
+
+
+# ---------------------------------------------------------
+# Source credibility weights.
+#
+# Rationale: official model/lab blogs and well-regarded technical
+# journalism are weighted highest; general tech blogs slightly lower.
+# This is a subjective, editable starting point -- not a claim of
+# objective truth -- and should be revisited once we have real
+# audience/engagement data (see architecture's Analytics Worker /
+# Optimization Engine, which is a later phase).
+# ---------------------------------------------------------
+CREDIBILITY_WEIGHTS: dict[str, float] = {
+    "OpenAI": 0.95,
+    "Google AI": 0.95,
+    "NVIDIA Blog": 0.90,
+    "Microsoft AI Blog": 0.90,
+    "MIT Technology Review AI": 0.90,
+    "Hugging Face Blog": 0.85,
+    "The Verge AI": 0.85,
+    "Ars Technica AI": 0.85,
+    "TechCrunch AI": 0.80,
+    "VentureBeat AI": 0.75,
+}
+
+# Fallback for any source not explicitly weighted above (e.g. a new
+# source added to the registry but not yet rated here).
+DEFAULT_CREDIBILITY = 0.60
+
+# How many independent outlets covering the same story counts as
+# "maximum momentum". 3+ outlets covering something is a strong
+# real-world signal that a story matters, without requiring an
+# unbounded count to keep climbing the score.
+MOMENTUM_CAP = 3
+
+# Final weighted blend. Recency dominates (this is a daily news
+# show), credibility and AI-relevance strength both matter
+# meaningfully, momentum provides a real but bounded boost -- see
+# the sanity-check numbers run before this was written: a stale
+# story with max momentum still loses to a fresh relevant one.
+SCORE_WEIGHTS = {
+    "recency": 0.35,
+    "credibility": 0.25,
+    "ai_relevance": 0.25,
+    "momentum": 0.15,
+}
+
+
+def compute_recency_score(
+    published_at: datetime,
+    now: datetime,
+    window_hours: float,
+) -> float:
+    """
+    Linear decay from 1.0 (published right now) to 0.0 (published
+    exactly `window_hours` ago). Anything older than the window
+    clamps to 0.0 rather than going negative.
+    """
+
+    hours_ago = (now - published_at).total_seconds() / 3600.0
+
+    score = 1.0 - (hours_ago / window_hours)
+
+    return max(0.0, min(1.0, score))
+
+
+def compute_credibility_score(source_name: str) -> float:
+    """
+    Static per-source credibility weight. See CREDIBILITY_WEIGHTS
+    above for rationale and DEFAULT_CREDIBILITY for the fallback.
+    """
+
+    return CREDIBILITY_WEIGHTS.get(source_name, DEFAULT_CREDIBILITY)
+
+
+def compute_momentum_score(duplicate_count: int, cap: int = MOMENTUM_CAP) -> float:
+    """
+    How many other stories were grouped as duplicates of this one
+    (i.e. how many other outlets independently covered the same
+    story). More coverage = more momentum, capped so one viral story
+    doesn't mathematically dominate everything else.
+    """
+
+    if cap <= 0:
+        return 0.0
+
+    return max(0.0, min(1.0, duplicate_count / cap))
+
+
+def compute_total_score(
+    published_at: datetime | None,
+    source_name: str,
+    ai_relevance_score: float | None,
+    duplicate_count: int,
+    now: datetime,
+    window_hours: float,
+) -> tuple[float, str]:
+    """
+    Compute the final weighted ranking score for a single story.
+    Returns (total_score, human_readable_reason) so the reason can
+    be stored for audit/explainability (same pattern as the AI
+    relevance filter and the dedup filter).
+    """
+
+    # A story with no publish date can't get a recency score; treat
+    # it as the worst case (0.0) rather than crashing or guessing.
+    recency = (
+        compute_recency_score(published_at, now, window_hours)
+        if published_at is not None
+        else 0.0
+    )
+
+    credibility = compute_credibility_score(source_name)
+
+    # ai_relevance_score already comes out of the AI relevance filter
+    # in the 0.0-1.0 range; reuse it directly as the "AI impact"
+    # component rather than inventing a second scoring pass.
+    ai_component = ai_relevance_score if ai_relevance_score is not None else 0.0
+
+    momentum = compute_momentum_score(duplicate_count)
+
+    total = (
+        SCORE_WEIGHTS["recency"] * recency
+        + SCORE_WEIGHTS["credibility"] * credibility
+        + SCORE_WEIGHTS["ai_relevance"] * ai_component
+        + SCORE_WEIGHTS["momentum"] * momentum
+    )
+
+    reason = (
+        f"recency={recency:.2f}(w={SCORE_WEIGHTS['recency']}), "
+        f"credibility={credibility:.2f}(w={SCORE_WEIGHTS['credibility']}), "
+        f"ai_relevance={ai_component:.2f}(w={SCORE_WEIGHTS['ai_relevance']}), "
+        f"momentum={momentum:.2f}(w={SCORE_WEIGHTS['momentum']}, "
+        f"duplicate_count={duplicate_count}) "
+        f"=> total={total:.3f}"
+    )
+
+    return total, reason

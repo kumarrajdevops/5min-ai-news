@@ -1,0 +1,163 @@
+from datetime import date, datetime, timezone
+
+from sqlalchemy import (
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+
+class Story(Base):
+    __tablename__ = "stories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50),nullable=False,default="rss")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    author: Mapped[str | None] = mapped_column(String(255))
+    external_id: Mapped[str | None] = mapped_column(String(500))
+    raw_summary: Mapped[str | None] = mapped_column(Text)
+    raw_content: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="collected",
+        nullable=False,
+    )
+
+    ai_relevance: Mapped[str] = mapped_column(
+        String(50),
+        default="pending",
+        nullable=False,
+    )
+
+    ai_relevance_score: Mapped[float | None] = mapped_column(
+        nullable=True,
+    )
+
+    filter_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # -----------------------------------------------------------
+    # Deduplication
+    # -----------------------------------------------------------
+    # NULL = this story is canonical (unique, or the representative
+    # of a duplicate group). Non-null = this story is a duplicate of
+    # the story with that id. We never delete duplicate rows; the
+    # raw article stays in the table for audit purposes, it's just
+    # excluded from downstream ranking/publishing via this pointer.
+    canonical_story_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stories.id"),
+        nullable=True,
+        index=True,
+    )
+
+    # Explanation of why this story was linked to its canonical
+    # story (similarity scores, time delta) -- same audit pattern
+    # as filter_reason on the AI relevance filter.
+    dedup_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("url", name="uq_stories_url"),
+    )
+
+
+class Episode(Base):
+    """
+    One row per ranking/selection run -- conceptually, one row per
+    daily video episode. The actual Top-25 + 5-backup selection for
+    this episode lives in EpisodeStory rows, not here, so this table
+    stays small and simple.
+    """
+
+    __tablename__ = "episodes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # The calendar day this episode is for (IST daily cycle, per the
+    # architecture's 6 AM IST publication schedule). Not unique --
+    # multiple selection runs on the same day are allowed and each
+    # preserved as its own history entry.
+    run_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    # draft -> (future: approved -> published), managed by the
+    # Editorial Dashboard phase, not this one.
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="draft",
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class EpisodeStory(Base):
+    """
+    One row per (episode, story) selection -- the actual Top-25 +
+    5-backup list for a given episode. A story can appear in more
+    than one episode across separate runs; each run's full snapshot
+    is preserved independently rather than mutating Story itself.
+    """
+
+    __tablename__ = "episode_stories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    episode_id: Mapped[int] = mapped_column(
+        ForeignKey("episodes.id"),
+        nullable=False,
+        index=True,
+    )
+
+    story_id: Mapped[int] = mapped_column(
+        ForeignKey("stories.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # 1-30. 1-25 = primary (publish), 26-30 = backup.
+    rank_position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # "primary" or "backup".
+    selection_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    rank_score: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Breakdown of the score components, for audit/explainability --
+    # same pattern as Story.filter_reason and Story.dedup_reason.
+    rank_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("episode_id", "story_id", name="uq_episode_story"),
+        UniqueConstraint(
+            "episode_id", "rank_position", name="uq_episode_rank_position"
+        ),
+    )
