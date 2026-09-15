@@ -1,13 +1,24 @@
 from datetime import date
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 
 from app.db import SessionLocal
-from app.models import Episode, EpisodeStory, Story
+from app.models import Episode, EpisodeStory, Story, StoryContent
+from app.tasks.content import generate_script_task
 from app.tasks.dedup import deduplicate_new_stories
 from app.tasks.ingestion import ingest_news
 from app.tasks.ranking import run_ranking_selection
+
+
+# Object-storage-style local media root (see app/tasks/content.py).
+# Created up front so the StaticFiles mount below always has a valid
+# directory to serve, even before any content has been generated yet.
+MEDIA_ROOT = Path("media")
+for _subdir in ("audio", "images", "captions", "videos"):
+    (MEDIA_ROOT / _subdir).mkdir(parents=True, exist_ok=True)
 
 
 app = FastAPI(
@@ -15,6 +26,11 @@ app = FastAPI(
     version="0.1.0",
     description="Local-first AI technology news pipeline.",
 )
+
+# Serves generated audio/images/captions/videos directly, e.g.
+# GET /media/videos/15.mp4 -- lets a browser play back a produced
+# story's video without a separate file server.
+app.mount("/media", StaticFiles(directory=str(MEDIA_ROOT)), name="media")
 
 
 @app.on_event("startup")
@@ -208,6 +224,73 @@ def list_stories(limit: int = 30):
             }
             for story in stories
         ]
+
+
+@app.post("/api/v1/stories/{story_id}/produce")
+def trigger_content_production(story_id: int):
+    """
+    Kick off the full script -> voice -> visual -> video pipeline for
+    a single story (see app/tasks/content.py). Each stage chains into
+    the next via .delay(); poll GET /api/v1/stories/{id}/content for
+    progress.
+
+    Deliberately scoped to one story at a time for now -- this proves
+    out the architecture's Script/Voice/Visual/Video stages end to
+    end before wiring them up to run across an entire Top-25 episode.
+    """
+    with SessionLocal() as db:
+        story = db.get(Story, story_id)
+
+        if story is None:
+            raise HTTPException(status_code=404, detail="Story not found.")
+
+    task = generate_script_task.delay(story_id)
+    return {"story_id": story_id, "task_id": task.id, "status": "queued"}
+
+
+@app.get("/api/v1/stories/{story_id}/content")
+def get_story_content(story_id: int):
+    """
+    Fetch the generated production artifacts for a story: script
+    text, and URLs for the audio/image/captions/video files once
+    each stage has completed. `status` tracks progress through the
+    pipeline (pending -> script_ready -> voice_ready -> visual_ready
+    -> video_ready, or failed -- see error_message).
+    """
+    with SessionLocal() as db:
+        content = (
+            db.query(StoryContent)
+            .filter(StoryContent.story_id == story_id)
+            .first()
+        )
+
+        if content is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No content generated for this story yet.",
+            )
+
+        def media_url(path: str | None) -> str | None:
+            # Stored paths already look like "media/audio/15.mp3",
+            # matching the /media StaticFiles mount above.
+            return f"/{path}" if path else None
+
+        return {
+            "story_id": content.story_id,
+            "status": content.status,
+            "headline": content.headline,
+            "summary": content.summary,
+            "why_it_matters": content.why_it_matters,
+            "script_text": content.script_text,
+            "audio_url": media_url(content.audio_path),
+            "audio_duration_seconds": content.audio_duration_seconds,
+            "image_url": media_url(content.image_path),
+            "captions_url": media_url(content.captions_path),
+            "video_url": media_url(content.video_path),
+            "error_message": content.error_message,
+            "created_at": content.created_at,
+            "updated_at": content.updated_at,
+        }
 
 
 @app.get("/api/v1/stories/{story_id}/duplicates")

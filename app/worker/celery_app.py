@@ -10,6 +10,7 @@ celery_app = Celery(
         "app.tasks.ingestion",
         "app.tasks.dedup",
         "app.tasks.ranking",
+        "app.tasks.content",
     ],
 )
 

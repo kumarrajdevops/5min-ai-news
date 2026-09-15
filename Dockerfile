@@ -10,6 +10,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 # Make Python logs appear immediately in Docker logs.
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+# ffmpeg: composes the final video from audio + image + captions.
+# fonts-dejavu-core: provides the TTF fonts used to render the
+# branded visual card (Pillow needs a real font file, not a default).
+
 COPY requirements.txt .
 # Copy Python dependencies into the image.
 

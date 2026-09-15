@@ -64,6 +64,41 @@ window closes, not after every ingestion pass:
 curl -X POST http://localhost:8000/api/v1/episodes/select
 ```
 
+## Producing a story (script + voice + visual + video)
+
+**Proof-of-concept scope:** this pipeline currently runs on **one
+story at a time**, not yet the full Top-25 episode. Pick a
+`story_id` (e.g. from `/api/v1/episodes/latest`) and kick off the
+full chain -- script generation, then voice synthesis, then the
+visual card, then video composition, each auto-chained into the next:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/stories/{story_id}/produce
+```
+
+Poll for progress/results (`status` moves through `pending` ->
+`script_ready` -> `voice_ready` -> `visual_ready` -> `video_ready`,
+or `failed` -- see `error_message`):
+
+```bash
+curl http://localhost:8000/api/v1/stories/{story_id}/content
+```
+
+The response includes playable URLs (served from `/media`, e.g.
+`http://localhost:8000/media/videos/{story_id}.mp4`) for the
+generated audio, image, captions, and final video.
+
+All four stages are free/local, no API keys required:
+
+- **Script** -- deterministic, template-based (headline + summary +
+  "why it matters"), same pattern as the AI-relevance/dedup filters.
+- **Voice** -- [edge-tts](https://github.com/rany2/edge-tts) (free
+  Microsoft neural TTS, one branded voice for every story).
+- **Visual** -- a branded title card rendered with Pillow.
+- **Video** -- ffmpeg composes the image + audio + burned-in captions
+  into an mp4. Captions are timed with a naive proportional estimate
+  (not real forced alignment) -- see `TODO.md`.
+
 ## Inspecting results
 
 ```bash

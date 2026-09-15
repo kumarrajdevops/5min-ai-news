@@ -161,3 +161,64 @@ class EpisodeStory(Base):
             "episode_id", "rank_position", name="uq_episode_rank_position"
         ),
     )
+
+
+class StoryContent(Base):
+    """
+    Generated production artifacts for a single story -- script,
+    narration audio, branded visual, and composed video. One row per
+    story (1:1), produced by the app.tasks.content Celery chain.
+
+    Scoped to individual stories rather than whole episodes for now:
+    this is the first pass at the architecture's Script/Voice/
+    Visual/Video stages, proven out end-to-end on one story at a time
+    before being wired up to run across an entire Top-25 episode.
+    """
+
+    __tablename__ = "story_content"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    story_id: Mapped[int] = mapped_column(
+        ForeignKey("stories.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    headline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    why_it_matters: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Full spoken narration -- headline + summary + why_it_matters,
+    # concatenated. This is what gets fed to voice synthesis.
+    script_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    audio_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audio_duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
+
+    image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    captions_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    video_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # pending -> script_ready -> voice_ready -> visual_ready ->
+    # video_ready (or failed, at any stage -- see error_message).
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="pending",
+        nullable=False,
+    )
+
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True,
+    )

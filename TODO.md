@@ -48,7 +48,57 @@ deleting history, so it stays a running log.
       message on bad input, instead of silently queuing a task that fails in
       the worker. Verified against the live API. See `errors.md` §4 update.
 
+### This session — 2026-09-15, part 2 (script/voice/visual/video, one-story proof of concept)
+- [x] Added `story_content` table (1:1 with `stories`) tracking generated
+      script/audio/image/captions/video paths and a `status` progress field
+- [x] Script generation: deterministic, template-based (`app/content/script_generator.py`)
+      -- headline, summary (HTML-stripped RSS summary), "why it matters"
+      (built from the AI-relevance filter's already-computed keywords).
+      No LLM, no API key -- same pattern as the existing AI-relevance/dedup filters.
+- [x] Voice generation: `edge-tts` (`app/content/voice_generator.py`), one hardcoded
+      branded voice (`en-US-GuyNeural`), free, no API key
+- [x] Visual generation: Pillow-rendered branded title card (`app/content/visual_generator.py`),
+      no API key
+- [x] Video composition: ffmpeg combines image + audio + burned-in captions into
+      an mp4 (`app/content/video_composer.py`); captions timed via a naive
+      proportional estimate (character-count share of total audio duration)
+- [x] New Celery chain (`app/tasks/content.py`): `generate_script_task` ->
+      `generate_voice_task` -> `generate_visual_task` -> `compose_video_task`,
+      each stage persisting progress/failure to `story_content.status`
+- [x] New endpoints: `POST /api/v1/stories/{id}/produce`,
+      `GET /api/v1/stories/{id}/content`; `/media` mounted via `StaticFiles`
+      so generated audio/image/video are directly playable by URL
+- [x] Dockerfile: added `ffmpeg` + `fonts-dejavu-core` (apt packages)
+- [x] requirements.txt: added `edge-tts` and `Pillow`
+- [x] **Bug found and fixed during testing:** pinned `edge-tts==6.1.9` failed
+      every synthesis call with `403 Invalid response status` -- Microsoft's
+      TTS endpoint now requires a `Sec-MS-GEC` signed token that 6.1.9
+      predates. Bumped to `edge-tts==7.2.8` (latest at the time), fixed.
+- [x] Verified end-to-end on story #15 (the top-ranked story from the latest
+      episode): real ~30s narrated audio, correctly rendered branded visual
+      card (Unicode included), proportionally-timed captions, valid h264/aac
+      mp4 (confirmed via `ffprobe`). Also ruled out a false alarm: `’`
+      appeared as mojibake in one local test command's output, but the raw
+      Postgres bytes were correct UTF-8 the whole time -- a Windows/Git-Bash
+      terminal decoding artifact in the test tool, not an app bug.
+
 ## Known issues / follow-ups
+
+- [ ] Caption timing in `compose_video_task` is a naive proportional estimate
+      (sentence character-count share of total audio duration), not real
+      forced alignment against the TTS engine's actual word timings --
+      captions will drift out of sync on longer/uneven sentences. Real
+      alignment is future work.
+- [ ] Composed video duration (`ffprobe` on the final mp4) doesn't exactly
+      match the source audio duration stored on `story_content` (seen: audio
+      29.7s vs muxed video 31.4s) -- likely `-shortest`/keyframe rounding in
+      the ffmpeg compose step. Cosmetic, didn't affect playback, not
+      root-caused yet.
+- [ ] Script/voice/visual/video pipeline is scoped to **one story at a
+      time** -- not yet wired up to run across an entire Top-25 episode
+      (would need per-episode orchestration, likely a "compose full episode"
+      task that fans out to all 25 stories then concatenates/sequences the
+      results into one video).
 
 - [ ] `worker` container runs Celery as root (harmless locally, but the image has
       no non-root user — should fix before any production deployment)
