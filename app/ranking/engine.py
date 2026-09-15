@@ -25,6 +25,13 @@ CREDIBILITY_WEIGHTS: dict[str, float] = {
     "Google DeepMind News": 0.95,
     "Wired — Artificial Intelligence": 0.85,
     "Hacker News": 0.75,
+    # Publishers resolved from Hacker News link-posts (see
+    # app/sources/publisher_resolver.py) -- the actual outlet that
+    # wrote the story, not the discovery channel.
+    "The Guardian": 0.85,
+    "The Register": 0.80,
+    "MacRumors": 0.75,
+    "IEEE Spectrum": 0.90,
 }
 
 # Fallback for any source not explicitly weighted above (e.g. a new

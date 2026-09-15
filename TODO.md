@@ -165,6 +165,37 @@ deleting history, so it stays a running log.
       about the same Apple iOS 27 release, 77% title similarity) -- momentum
       had been 0 for every story until this point.
 
+### This session — 2026-09-15, part 6 (HN source-name vs. publisher fix)
+- [x] Reviewed `proposal.md` (an externally-authored document) and verified
+      every specific claim it made against live Episode 4 data -- all
+      accurate, including that a genuine Guardian article was stored with
+      `source_name: "Hacker News"` and scored at HN's 0.75 credibility tier
+      instead of whatever a Guardian-specific weight would be. Independently
+      found one more case: a story titled "...(Not AI Gen)" was classified
+      as an AI candidate purely because "AI" appears as a substring in its
+      own title (`filter_reason: "Matched: ai"`) -- a separate, smaller issue
+      not addressed by this fix, noted here for later.
+- [x] Fixed the source-vs-publisher conflation: added
+      `app/sources/publisher_resolver.py` (`resolve_publisher(url)`),
+      resolving the real publisher from a story's URL domain instead of
+      hardcoding `"Hacker News"` for every HN-discovered story.
+      `source_type="hackernews"` still marks the discovery channel; genuine
+      Ask/Show/Tell HN self-posts still correctly resolve to `"Hacker News"`
+      as their real publisher.
+- [x] Added credibility weights for the 4 outlets already confirmed present
+      in real data: The Guardian (0.85), The Register (0.80), MacRumors
+      (0.75), IEEE Spectrum (0.90). Everything else not curated correctly
+      falls through to `DEFAULT_CREDIBILITY = 0.60`.
+- [x] Added `app/scripts/backfill_hn_publisher.py` (same pattern as the
+      existing `backfill_ai_relevance.py`) to re-resolve `source_name` for
+      the 13 HN stories already in the database from earlier this session.
+- [ ] Not addressed here (deliberately out of scope, noted above): the
+      "(Not AI Gen)" false-positive and the much larger taxonomy-redesign
+      proposal in `proposal.md` (Major News / Developer Radar / Research &
+      Security / Tools sections, event clustering, content-type
+      classification) -- a legitimate longer-term direction, needs its own
+      dedicated planning pass.
+
 ## Known issues / follow-ups
 
 - [ ] Caption timing in `compose_video_task` is a naive proportional estimate
@@ -223,3 +254,30 @@ deleting history, so it stays a running log.
 - [ ] Optimization Engine (feed analytics back into ranking)
 - [ ] AWS evolution (EventBridge scheduled jobs, RDS, S3)
 - [ ] Kubernetes/EKS evolution
+
+### Design principle for the future taxonomy/categorized-episode work
+
+From `proposal.md` (see the taxonomy-redesign item above, not yet
+scheduled) -- worth preserving on its own since it reframes what
+"Top 25" even means, independent of whether/when the fuller
+Major-News/Developer-Radar/Research/Tools redesign gets built:
+
+> The 25 is a **daily information budget**, not a claim that 25 major
+> news events happened. Some days: 9 major news + 4 research + 3
+> security + 7 developer + 2 public impact = 25. Other days: 15 major
+> news + 4 research + 3 security + 3 developer = 25. Other days: 6
+> major news + 3 research + 2 security + 8 developer + 6 tools = 25.
+> All three are "perfect" -- none is a shortfall.
+
+Why this matters for this project specifically: it's the design
+answer to "will we ever run out of 30 stories/day?" (the question
+that originally motivated expanding sources to Hacker News, RSS
+additions, etc. -- see the RSS/HN expansion notes above). Treating
+research/security/developer/tool content as legitimate, differently-
+weighted budget categories rather than diluted "news" means a quiet
+major-news day doesn't have to mean an under-filled or padded-with-
+junk episode -- Hacker News alone reliably supplies 19-24 qualifying
+items/day (verified this session) across exactly these categories.
+This only pays off once content-type classification and per-category
+ranking exist (part of the larger taxonomy redesign, not built yet) --
+recorded here now so the principle isn't lost before that work starts.

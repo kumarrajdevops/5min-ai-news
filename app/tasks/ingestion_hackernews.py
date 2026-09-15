@@ -7,6 +7,7 @@ from app.db import SessionLocal  # PostgreSQL database session
 from app.filters.ai_relevance import calculate_ai_relevance  # AI relevance filter
 from app.models import Story  # Story database model
 from app.sources.hackernews_api import fetch_ai_stories  # Hacker News fetcher
+from app.sources.publisher_resolver import resolve_publisher  # Real publisher from URL
 from app.tasks.dedup import deduplicate_new_stories  # Duplicate-story grouping
 from app.worker.celery_app import celery_app  # Celery application
 
@@ -111,7 +112,12 @@ def ingest_hackernews_stories() -> dict:
             story = Story(
                 title=title.strip(),
                 url=url.strip(),
-                source_name=SOURCE_NAME,
+                # source_name is the actual publisher (resolved from
+                # the URL's domain -- e.g. "The Guardian" for a link
+                # post, or "Hacker News" itself for a genuine
+                # Ask/Show/Tell HN self-post). source_type stays
+                # "hackernews" as the discovery-channel marker.
+                source_name=resolve_publisher(url),
                 source_type="hackernews",
                 published_at=published_at,
                 author=hit.get("author"),
