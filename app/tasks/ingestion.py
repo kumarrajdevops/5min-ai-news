@@ -17,7 +17,7 @@ from app.worker.celery_app import celery_app  # Celery application
 # feedparser does not send one by default, so we set one explicitly.
 FEED_USER_AGENT = (
     "Mozilla/5.0 (compatible; AINewsPlatformBot/1.0; "
-    "+https://github.com/ai-news-platform)"
+    "+https://github.com/5min-ai-news)"
 )
 
 
