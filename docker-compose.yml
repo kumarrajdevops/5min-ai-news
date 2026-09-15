@@ -1,3 +1,13 @@
+name: 5min-ai-news
+# Pinned explicitly so the named volume below always resolves to
+# "5min-ai-news_postgres_data" regardless of what the containing
+# folder is called. Without this, Docker Compose derives the project
+# name from the parent folder name -- renaming the folder would make
+# Compose look for a differently-prefixed volume, find none, and
+# silently create a fresh empty one (data loss, not an error).
+# Note: the production/public brand name is "AI News Platform" --
+# see README.md. This is just the dev/repo-level project name.
+
 services:
   postgres:
     image: postgres:16

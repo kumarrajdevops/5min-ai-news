@@ -1,7 +1,9 @@
-from app.db import SessionLocal, init_db
-from fastapi import FastAPI, HTTPException
-from sqlalchemy import select
+from datetime import date
 
+from fastapi import FastAPI, HTTPException
+from sqlalchemy import select, text
+
+from app.db import SessionLocal
 from app.models import Episode, EpisodeStory, Story
 from app.tasks.dedup import deduplicate_new_stories
 from app.tasks.ingestion import ingest_news
@@ -15,7 +17,28 @@ app = FastAPI(
 )
 
 
+@app.on_event("startup")
+def startup() -> None:
+    """
+    Verify the database is reachable at startup.
 
+    Schema management belongs entirely to Alembic
+    (`alembic upgrade head`) -- this app deliberately does NOT call
+    Base.metadata.create_all() here. It used to, and that caused a
+    real bug: create_all() builds the full current schema straight
+    from the latest models on any fresh database, but Alembic never
+    finds out a migration was "applied" that way. A later
+    `alembic upgrade head` then tries to re-run migration #1 from
+    scratch and fails with DuplicateColumn, because the columns
+    already exist. Keeping schema creation solely in Alembic's hands
+    avoids that class of bug entirely.
+
+    This still fails loudly and immediately if the database is
+    completely unreachable (wrong host/credentials, Postgres not up
+    yet) rather than deferring that failure to the first request.
+    """
+    with SessionLocal() as db:
+        db.execute(text("SELECT 1"))
 
 
 @app.get("/health")
@@ -51,7 +74,21 @@ def trigger_ranking_selection(run_date: str | None = None):
 
     run_date: optional "YYYY-MM-DD" override, mainly for testing.
     Defaults to today (UTC date) if omitted.
+
+    Validated here rather than left to the Celery task: the task runs
+    out-of-process, so an invalid value would otherwise fail silently
+    from the caller's perspective (HTTP 200 + queued task_id, with the
+    actual ValueError only visible in the worker logs).
     """
+    if run_date is not None:
+        try:
+            date.fromisoformat(run_date)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid run_date {run_date!r}; expected YYYY-MM-DD.",
+            )
+
     task = run_ranking_selection.delay(run_date)
     return {"task_id": task.id, "status": "queued"}
 

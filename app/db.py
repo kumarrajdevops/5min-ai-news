@@ -18,8 +18,8 @@ class Base(DeclarativeBase):
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
-
-def init_db() -> None:
-    from app.models import Story  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
+# NOTE: there is deliberately no init_db()/create_all() here anymore.
+# Schema management is Alembic's job exclusively -- run
+# `alembic upgrade head` before starting the app. See app/main.py's
+# startup() docstring for why this matters (create_all() vs Alembic
+# version tracking used to conflict and break migrations).

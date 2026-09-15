@@ -1,7 +1,7 @@
 """add ai relevance fields
 
 Revision ID: 996b16094585
-Revises:
+Revises: 6f1e2a7b9c04
 Create Date: 2026-09-10
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 # ---------------------------------------------------------
 
 revision: str = "996b16094585"
-down_revision: Union[str, Sequence[str], None] = None
+down_revision: Union[str, Sequence[str], None] = "6f1e2a7b9c04"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
