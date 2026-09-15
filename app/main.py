@@ -280,7 +280,6 @@ def get_story_content(story_id: int):
             "status": content.status,
             "headline": content.headline,
             "summary": content.summary,
-            "why_it_matters": content.why_it_matters,
             "script_text": content.script_text,
             "audio_url": media_url(content.audio_path),
             "audio_duration_seconds": content.audio_duration_seconds,

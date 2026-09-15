@@ -188,10 +188,11 @@ class StoryContent(Base):
 
     headline: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    why_it_matters: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Full spoken narration -- headline + summary + why_it_matters,
-    # concatenated. This is what gets fed to voice synthesis.
+    # Full spoken narration -- headline + summary, concatenated.
+    # This is what gets fed to voice synthesis. Deliberately just the
+    # facts: no "why it matters" editorializing or speculative
+    # commentary.
     script_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     audio_path: Mapped[str | None] = mapped_column(Text, nullable=True)

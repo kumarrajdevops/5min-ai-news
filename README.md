@@ -90,8 +90,10 @@ generated audio, image, captions, and final video.
 
 All four stages are free/local, no API keys required:
 
-- **Script** -- deterministic, template-based (headline + summary +
-  "why it matters"), same pattern as the AI-relevance/dedup filters.
+- **Script** -- deterministic, template-based: headline + a
+  deterministic summary of the story, nothing more (no editorializing
+  or speculative "why it matters" commentary). Same pattern as the
+  AI-relevance/dedup filters.
 - **Voice** -- [edge-tts](https://github.com/rany2/edge-tts) (free
   Microsoft neural TTS, one branded voice for every story).
 - **Visual** -- a branded title card rendered with Pillow.

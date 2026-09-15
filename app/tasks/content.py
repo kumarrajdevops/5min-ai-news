@@ -58,13 +58,10 @@ def generate_script_task(story_id: int) -> dict:
             script = generate_script(
                 title=story.title,
                 raw_summary=story.raw_summary,
-                filter_reason=story.filter_reason,
-                source_name=story.source_name,
             )
 
             content.headline = script["headline"]
             content.summary = script["summary"]
-            content.why_it_matters = script["why_it_matters"]
             content.script_text = script["script_text"]
             content.status = "script_ready"
             content.error_message = None
