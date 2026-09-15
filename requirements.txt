@@ -10,3 +10,4 @@ python-dateutil==2.9.0.post0
 alembic
 edge-tts==7.2.8
 Pillow==10.4.0
+requests==2.32.3

@@ -66,4 +66,20 @@ NEWS_SOURCES = [
         "source_type": "rss",
         "enabled": True,
     },
+    {
+        "name": "Google DeepMind News",
+        "url": "https://deepmind.google/blog/rss.xml",
+        "source_type": "rss",
+        # Verified 2026-09-15: official feed, HTTP 200, valid RSS 2.0,
+        # latest item dated 2026-09-08.
+        "enabled": True,
+    },
+    {
+        "name": "Wired — Artificial Intelligence",
+        "url": "https://www.wired.com/feed/tag/ai/latest/rss",
+        "source_type": "rss",
+        # Verified 2026-09-15: official Condé Nast tag feed, HTTP 200,
+        # valid RSS 2.0, latest item dated 2026-09-14.
+        "enabled": True,
+    },
 ]

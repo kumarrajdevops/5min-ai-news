@@ -10,6 +10,7 @@ from app.models import Episode, EpisodeStory, Story, StoryContent
 from app.tasks.content import generate_script_task
 from app.tasks.dedup import deduplicate_new_stories
 from app.tasks.ingestion import ingest_news
+from app.tasks.ingestion_hackernews import ingest_hackernews_stories
 from app.tasks.ranking import run_ranking_selection
 
 
@@ -65,6 +66,18 @@ def health():
 @app.post("/api/v1/ingestion/rss")
 def trigger_rss_ingestion():
     task = ingest_news.delay()
+    return {"task_id": task.id, "status": "queued"}
+
+
+@app.post("/api/v1/ingestion/hackernews")
+def trigger_hackernews_ingestion():
+    """
+    Pull AI-related Hacker News stories (official Algolia search API)
+    and chain into deduplication, same as RSS ingestion. Kept as a
+    separate endpoint/task from RSS so an HN API outage can't affect
+    RSS ingestion.
+    """
+    task = ingest_hackernews_stories.delay()
     return {"task_id": task.id, "status": "queued"}
 
 

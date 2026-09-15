@@ -97,6 +97,74 @@ deleting history, so it stays a running log.
       worker` is required before re-running a task, or the old code silently
       keeps running.
 
+### This session — 2026-09-15, part 4 (source list expansion)
+- [x] Reviewed an external analysis (`public-response.md`) of the episode/video
+      pipeline; verified its claims against the live system rather than
+      accepting them at face value. Its "Top-25 selection: Not Achieved" framing
+      was misleading -- confirmed there are only 16 total canonical
+      AI-candidate stories in the whole database right now (not a broken
+      selector; the code correctly doesn't pad to 25 with fewer than 30
+      candidates, already verified in `errors.md`). "Episode 3" was also just
+      an artifact of earlier manual re-testing, not 3 real daily runs.
+- [x] Answered directly: with the 8 sources enabled at the time, one real
+      ingestion pass produced 2153 RSS entries seen -> 26 inserted -> only 16
+      AI-candidate canonical stories. Not close to 30/day, and nothing was
+      actually "global" (all sources English-language, US-centric tech press).
+- [x] Researched and verified (via live `curl`, not just search results) two
+      new officially-hosted, active RSS sources and added them to
+      `app/sources/registry.py` + `app/ranking/engine.py`'s `CREDIBILITY_WEIGHTS`:
+      **Google DeepMind News** (`https://deepmind.google/blog/rss.xml`) and
+      **Wired — Artificial Intelligence** (`https://www.wired.com/feed/tag/ai/latest/rss`).
+- [x] **Researched and deliberately skipped** (documented so this isn't
+      silently re-researched later):
+      - Anthropic, Meta AI -- no official RSS feed exists at all, only
+        unofficial third-party scraper mirrors (e.g. GitHub Pages projects
+        re-scraping their blogs). Skipped per user decision: same fragility
+        class already worked around with VentureBeat/Microsoft AI Blog.
+      - CNBC Technology -- the feed ID found via search was actually a video
+        show feed ("Squawk Box Europe"), not Technology news. Dropped rather
+        than guess further; the real Technology feed URL wasn't confirmed.
+      - Axios AI, Engadget's AI tag, Business Insider, TechRadar's AI
+        category -- no confirmed direct feed URL found in this research pass.
+        Candidates for a future pass, not confirmed dead ends.
+- [ ] **Two new sources alone do not guarantee ~30/day.** This is incremental,
+      not a fix -- reaching a reliable daily average needs either more
+      verified-source research passes, or the not-yet-built scheduled
+      multi-pass daily collection (separate item below), since a single manual
+      trigger only ever captures one snapshot in time.
+
+### This session — 2026-09-15, part 5 (Hacker News as a non-RSS source)
+- [x] Added Hacker News as a new "News API"-category source (per `project.md`'s
+      architecture, distinct from RSS/Websites) -- new fetcher
+      (`app/sources/hackernews_api.py`) using the official Algolia search API,
+      new Celery task (`app/tasks/ingestion_hackernews.py`), new endpoint
+      `POST /api/v1/ingestion/hackernews`, credibility weight added
+      (`"Hacker News": 0.75`). New dependency: `requests`.
+- [x] **Investigated and deliberately dropped GitHub** ("trending" via the
+      official Search API proxy -- `topic:artificial-intelligence` +
+      `created:>N days` + `sort:stars`). Verified live: repos created
+      yesterday top out at 2 stars, repos near a 14-day window's edge top out
+      at 16 stars -- nowhere close to real "trending," and structurally
+      biased toward obscure repos since the API can only sort by cumulative
+      stars, not stars-gained-recently. GitHub has no official trending API
+      at all, only unofficial scrapers, which were already ruled out per the
+      Anthropic/Meta AI precedent. Not adding GitHub as a source for now --
+      revisit only if a genuinely reliable trending signal becomes available.
+- [x] Verified Hacker News's actual daily consistency and content quality
+      before building (not just once): sampled `points>15` AI stories for
+      each of the last 7 individual days -- 19-24 qualifying stories every
+      single day, no dry days, many in the 100-1200+ point range on
+      substantive topics. Confirmed via a second immediate re-run of
+      ingestion that already-stored HN stories are correctly skipped as
+      duplicates, not re-surfaced as "new" -- answers "will these repeat
+      every day?" directly for the shipped behavior: no. Confirmed with real
+      numbers: first run `{'seen': 20, 'inserted': 20, 'duplicates': 0}`,
+      immediate second run `{'seen': 20, 'inserted': 0, 'duplicates': 20}`.
+      First real run also produced the first-ever cross-source duplicate
+      detected all session (an Ars Technica article and an HN story both
+      about the same Apple iOS 27 release, 77% title similarity) -- momentum
+      had been 0 for every story until this point.
+
 ## Known issues / follow-ups
 
 - [ ] Caption timing in `compose_video_task` is a naive proportional estimate

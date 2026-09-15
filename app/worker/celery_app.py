@@ -8,6 +8,7 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=[
         "app.tasks.ingestion",
+        "app.tasks.ingestion_hackernews",
         "app.tasks.dedup",
         "app.tasks.ranking",
         "app.tasks.content",

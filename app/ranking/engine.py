@@ -22,6 +22,9 @@ CREDIBILITY_WEIGHTS: dict[str, float] = {
     "Ars Technica AI": 0.85,
     "TechCrunch AI": 0.80,
     "VentureBeat AI": 0.75,
+    "Google DeepMind News": 0.95,
+    "Wired — Artificial Intelligence": 0.85,
+    "Hacker News": 0.75,
 }
 
 # Fallback for any source not explicitly weighted above (e.g. a new
