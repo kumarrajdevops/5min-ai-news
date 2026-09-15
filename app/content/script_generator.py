@@ -6,6 +6,13 @@ from html import unescape
 # clip, not a full article read-through.
 MAX_SUMMARY_SENTENCES = 3
 
+# RSS feeds frequently truncate their excerpt and mark the cut with a
+# trailing ellipsis, often bracketed (e.g. "...signing on to a
+# [&#8230;]", which unescapes to "...signing on to a […]"). That
+# "sentence" is the source's own excerpt cutoff, not a complete
+# thought -- keeping it produces a summary that trails off mid-idea.
+TRUNCATION_MARKER_RE = re.compile(r"[\[\(]?\s*(?:\.\.\.|…)\s*[\]\)]?\s*$")
+
 
 def _strip_html(text: str) -> str:
     # RSS summaries are frequently HTML fragments (<p>, <a>, entities).
@@ -37,6 +44,11 @@ def build_summary(
 
     cleaned = _strip_html(raw_summary)
     sentences = _split_sentences(cleaned)
+
+    # Drop a trailing truncated fragment (the source's own excerpt
+    # cutoff) rather than read it aloud mid-thought.
+    if sentences and TRUNCATION_MARKER_RE.search(sentences[-1]):
+        sentences = sentences[:-1]
 
     if not sentences:
         return "No summary was available from the source."

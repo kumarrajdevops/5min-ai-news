@@ -82,6 +82,21 @@ deleting history, so it stays a running log.
       Postgres bytes were correct UTF-8 the whole time -- a Windows/Git-Bash
       terminal decoding artifact in the test tool, not an app bug.
 
+### This session — 2026-09-15, part 3 (summary truncation bug)
+- [x] **Bug found and fixed:** `build_summary()` was including the source
+      RSS feed's own truncated-excerpt marker (e.g. "...signing on at least
+      partially to a [&#8230;]") as if it were a complete sentence, producing
+      scripts that read as dangling mid-thought. Added `TRUNCATION_MARKER_RE`
+      to detect and drop a trailing truncated fragment before assembling the
+      summary. Verified on story #15: summary now ends cleanly at the last
+      complete sentence.
+- [x] **Learned:** the `worker` container does not hot-reload on code changes
+      like the `api` container's `uvicorn --reload` does -- Celery loads task
+      modules once at process startup and keeps them in memory. After editing
+      any `app/tasks/*` or `app/content/*` file, `docker compose restart
+      worker` is required before re-running a task, or the old code silently
+      keeps running.
+
 ## Known issues / follow-ups
 
 - [ ] Caption timing in `compose_video_task` is a naive proportional estimate
