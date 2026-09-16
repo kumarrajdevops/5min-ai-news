@@ -275,7 +275,294 @@ deleting history, so it stays a running log.
       content-pipeline change, not a QA change) and building the
       Verification Engine so "source_verification" can become a real check.
 
+### This session — 2026-09-16, part 10 (Editorial Dashboard v1)
+- [x] Built the first-ever frontend for this project: `app/dashboard/` (vanilla
+      HTML/CSS/JS, served via `StaticFiles(html=True)` mounted in `app/main.py`
+      -- no new dependencies, no build step). Scoped per `dashboard-proposal.md`
+      (externally authored, full "AI News Studio" vision) with the user's
+      confirmed decisions: start lightweight, defer YouTube/Instagram/
+      analytics/cloud-storage/auth to a later workstream.
+- [x] Episode List view + Episode Studio view (video player, Top 30 with
+      primary/backup, QA panel, click-rank-to-jump-player, click-title-to-edit).
+- [x] New backend endpoints: `PATCH /api/v1/stories/{id}/content` (script
+      edit -- correctly resets content status + clears stale audio/image/
+      captions/video paths so a later `/produce` regenerates rather than
+      reusing stale media), `POST /api/v1/episodes/{id}/reorder`,
+      `POST /api/v1/episodes/{id}/swap` (backup <-> primary), `POST
+      .../approve`, `POST .../reject`, `GET /api/v1/episodes` (episode list --
+      didn't exist before, only `/latest` and `/{id}` did).
+- [x] Drag-and-drop reorder/swap uses native HTML5 drag events, no library
+      (dnd-kit), per the confirmed "keep interactivity simple so nothing
+      complex needs re-engineering if this ever migrates to React" approach.
+- [x] **Bug found and fixed during testing:** the `/swap` endpoint's direct
+      simultaneous position swap hit the same transient
+      `uq_episode_rank_position` unique-constraint collision the `/reorder`
+      endpoint had already been built to avoid -- reproduced with a real 500
+      error, fixed with the same "move one row out of the real rank range
+      first" technique, re-verified working.
+- [x] Backend endpoints (PATCH content, reorder, swap, approve, reject, list)
+      all verified directly against real data via `curl` -- reorder swapped
+      ranks 1/2 correctly, swap exchanged a primary/backup pair correctly
+      (after the fix), approve/reject correctly changed `Episode.status`,
+      PATCH correctly reset a story's content status and cleared stale paths.
+- [x] **Frontend UI click-tested in a real browser** (via `claude-in-chrome`,
+      connected this session): Episode List loads and links to Episode
+      Studio; video player loads and plays the produced episode 5 video with
+      audio/captions; "click rank to jump player" seeks correctly; "click
+      title to edit" opens the story edit modal with headline/summary/script
+      pre-filled; QA panel renders all check rows. No console errors on
+      load. Drag-and-drop reorder verified with real dispatched `DragEvent`s
+      (synthetic mouse drag doesn't trigger native HTML5 DnD, so this needed
+      actual `DragEvent`/`DataTransfer` objects) -- confirmed the DOM
+      reorders and fires `POST /episodes/{id}/reorder` (200), then reverted
+      the test reorder back to original order the same way.
+- [ ] Minor known gap, not exploitable through normal dashboard usage but
+      worth hardening later: `/reorder` doesn't explicitly validate that all
+      provided `story_ids` belong to the same `selection_status` group
+      (primary or backup) -- the dashboard only ever sends one group's full
+      id list, so this doesn't misbehave in practice, but the endpoint would
+      accept a mixed list without complaint.
+- [ ] Episode-level `video_status`/`qa_status` don't automatically become
+      stale after a reorder/swap/script edit -- only the edited story's own
+      `content_status` resets. Re-running Produce/QA after any edit is on
+      the human, not enforced by the system yet.
+
+### This session — 2026-09-16, part 11 (produce backups too + Produce/QA progress UI + stale-QA indicator)
+- [x] `produce_episode_video` (`app/tasks/episode_video.py`) now also produces
+      (script/voice/visual/video) the 5 backup stories, best-effort, as a
+      second phase that runs only after the primary video is already
+      concatenated and marked `ready` -- so a slow/failing backup can never
+      delay or block the primary episode. Backups are never appended to
+      `video_paths`/the concatenated output. Verified end-to-end on episode
+      5: first run produced 4/5 backups (1 was already `video_ready` from
+      earlier testing) in 18.6s total; immediate re-run correctly reused all
+      5 (`backups_produced: 0, backups_reused: 5`) in 5.7s, confirming
+      idempotency. Confirmed a swap of a now-`video_ready` backup into
+      primary needs no regeneration (`story_content.updated_at` unchanged
+      by the swap) -- the actual goal of this change.
+- [x] Added `Episode.video_produced_at` / `Episode.qa_run_at` (migration
+      `c3f7a1d92e58`), set by `produce_episode_video` (success path only)
+      and `run_episode_qa` respectively. Exposed via `_serialize_episode`.
+      Verified via curl: `video_produced_at` set on produce, `qa_run_at`
+      set (and later than `video_produced_at`) after running QA.
+- [x] Dashboard: **Produce** button now disables and shows a live `m:ss`
+      elapsed timer while queued, polling `GET /episodes/{id}` every 3s
+      until `video_status` leaves `"producing"`, then auto-refreshes the
+      studio view -- replaces the old "click Produce, refresh yourself in a
+      bit" alert. Resumes automatically on page reload if `video_status` is
+      still `"producing"` (elapsed timer restarts from reload time in that
+      case -- no true start time is persisted, noted as an accepted
+      approximation). **Run QA** button got the same treatment (poll every
+      1.5s comparing fresh `qa_run_at` against the click time, 30s safety
+      timeout), replacing the old blind `setTimeout(2500)`.
+- [x] **Run QA** button now shows an amber "stale" state (`Run QA ⚠
+      (stale)`, `.btn-warn` style reusing the existing `--skip` palette
+      tokens) whenever `video_produced_at > qa_run_at` (or QA has never
+      run) -- i.e. whenever Produce has completed since QA last ran.
+      Deliberately scoped to Produce only, per what was asked; reorder/
+      swap/script-edit still don't invalidate `qa_status` (pre-existing
+      gap, unchanged here -- see below).
+- [ ] **Not click-tested in a real browser this session** -- the
+      claude-in-chrome MCP connection dropped mid-session and couldn't be
+      re-established. All of the above was verified via curl/DB queries
+      (timestamps, idempotency counts, swap behavior) and a careful
+      line-by-line review of the `app.js` diff, plus confirming the served
+      `/dashboard/app.js` reflects the new code -- but the actual spinner/
+      timer/stale-button rendering and behavior in a live browser needs a
+      human click-through before trusting the UI layer specifically.
+- [x] **Bug found and fixed (user-reported, real click-through):** swapped a
+      backup into primary rank 1, clicked Produce -- timer showed "3 secs"
+      then refreshed showing the OLD video, unchanged. Root cause: `POST
+      .../produce` only queued the Celery task and returned immediately;
+      `episode.video_status` only flips to `"producing"` inside the task
+      itself, a moment after the worker picks it up. The dashboard's poll
+      stops as soon as `video_status !== "producing"` -- which can't tell
+      "hasn't started yet" apart from "already finished". If the first poll
+      (fired 3s after click) landed before the worker flipped the status,
+      it read the stale pre-produce value, wrongly concluded production was
+      already done, and re-rendered the still-old video while the real
+      production kept running unseen in the background. Fixed by setting
+      `episode.video_status = "producing"` synchronously in the `/produce`
+      endpoint itself, before queuing the task (`app/main.py`), closing the
+      race by construction. Verified: `video_status` now reads
+      `"producing"` immediately on the POST response and stays that way for
+      the full first few seconds (checked at t=0/1/3s); reproduced the
+      exact scenario (swap backup to primary rank 1, Produce) and confirmed
+      the combined video's duration changed and the API's reported rank-1
+      story matched the swap -- then reverted the test swap/re-produce to
+      restore episode 5's original state.
+      Note: the QA polling (`qa_run_at` timestamp comparison) does not have
+      this bug -- it compares against a fresh monotonic timestamp captured
+      at click time, not a transient status word, so there's no equivalent
+      "not started vs. already done" ambiguity.
+- [x] **User reported the exact same symptom again after the fix above** --
+      investigated further (still couldn't get claude-in-chrome reconnected
+      to click-test live, see below). Found and closed a second real gap:
+      `GET /media/videos/episode_N.mp4` was served with `Last-Modified`/
+      `ETag` but **no `Cache-Control` header at all** -- since the file is
+      regenerated in place at the same fixed URL every Produce run (no
+      content-hashed filename), a browser could apply heuristic freshness
+      and reuse a stale cached copy of the video without ever revalidating
+      against the server. Added `RevalidateStaticFiles` (`app/main.py`), a
+      thin `StaticFiles` subclass that sets `Cache-Control: no-cache` on
+      every `/media` response -- keeps the free conditional-GET/304 fast
+      path but forces revalidation every time, so a changed ETag is never
+      masked by a stale hit. Also added a small `no_store_api_responses`
+      middleware setting `Cache-Control: no-store` on all `/api/*`
+      responses, to remove any remaining doubt about the dashboard's
+      polling loop ever being satisfied from a cached JSON response
+      (these had no validators to begin with, so unlikely to have been
+      cached, but cheap to rule out explicitly). Verified via curl: both
+      headers now present (`no-cache` on `/media/videos/episode_5.mp4`,
+      `no-store` on `/api/v1/episodes/5`).
+- [x] **User confirmed after retesting:** the story order/content itself
+      now correctly updates after Produce (the two fixes above worked) --
+      but the automatic re-render after Produce completes (button resets
+      to normal on its own) still showed the OLD video; only a full manual
+      page refresh showed the new one. Since the button resetting proves
+      the poll->re-render cycle really did run a fresh fetch+DOM rebuild
+      (ruling out the earlier race and the missing-Cache-Control-header
+      issue, both already fixed), this pointed to a *different*, narrower
+      cause: browser `<video>` elements stream via HTTP range requests
+      (confirmed `accept-ranges: bytes` on the response), and browsers are
+      known to keep serving stale cached video segments under an unchanged
+      URL even with correct `Cache-Control` headers, because range-request
+      caching is handled by a separate media-cache pipeline that doesn't
+      always honor the same revalidation rules as a normal fetch.
+- [x] **Fixed properly via cache-busting** (the standard, bulletproof fix
+      for this class of bug -- sidesteps the media-cache question
+      entirely instead of fighting it): added `Episode.video_produced_at`
+      (already existed, from Part 11 above) as a `?v=` query-string suffix
+      on the episode player's `src` (`cacheBust()` helper, `app.js`), so a
+      real Produce always yields a URL the browser has never seen before.
+      Applied the same treatment to each story's edit-panel preview video
+      -- added `content_updated_at` to `_serialize_episode`'s per-story
+      entry (`app/main.py`) and used it the same way, since a script edit
+      -> re-Produce regenerates that story's video at the same fixed
+      per-story URL and would hit the identical bug. Verified via curl:
+      `video_produced_at`/`content_updated_at` are present in the API
+      response, and the video route still resolves correctly with a
+      `?v=...` suffix (query strings are ignored by StaticFiles routing,
+      200 OK).
+- [ ] **Still not click-tested live in a real browser this session** --
+      claude-in-chrome remains unavailable (retried twice, no matching
+      tools both times). Everything above verified via curl/DB checks
+      plus confirming the served `/dashboard/app.js` reflects the new
+      code. The user's own live retest (not this session's browser tool)
+      is what actually diagnosed the button-resets-but-video-stale
+      symptom that led to this fix -- please retest once more on your end
+      to confirm the cache-busted URL resolves the remaining issue.
+
+### This session — 2026-09-16, part 12 (source article link per story)
+- [x] Added a source-article link below each story's title/source in the
+      Top 30 list (`app/dashboard/app.js`'s `renderStoryList`), using the
+      already-exposed `story.url` field. Opens in a new tab (`target=
+      "_blank" rel="noopener noreferrer"`) so an editor can proofread the
+      generated script against the original article without losing their
+      place in the dashboard. Click on the link stops event propagation
+      so it doesn't also trigger the row's existing "click to edit script"
+      handler. No backend changes needed -- `url` was already in
+      `_serialize_episode`'s per-story response.
+- [x] **Follow-up (same session):** added the same source link to the edit
+      panel too (it was missing there), and changed both places to show
+      the actual URL text itself (selectable/copyable, not just an arrow
+      icon) plus a one-click **Copy** button, so an editor can grab the
+      link to share it elsewhere -- not just open it. Shared via one
+      `renderSourceLinkHtml()`/`wireSourceLinkCopyButtons()` pair
+      (`app.js`) used in both `renderStoryList` and `openEditPanel`; new
+      `#edit-source` container added to `index.html`, right above the
+      Headline field. Uses `navigator.clipboard.writeText()` with a
+      fallback alert showing the raw link if the clipboard API is
+      unavailable/denied.
+- [x] **Correctness fix caught during review:** `escapeHtml()` escapes
+      `&`/`<`/`>` (safe for text nodes) but not `"`, so its output isn't
+      safe to embed inside an HTML attribute value -- this is the first
+      place in the dashboard doing that (`href="..."`, `data-url="..."`).
+      Added a dedicated `escapeAttr()` (escapeHtml + quote-escaping) and
+      used it for both attributes, closing a latent HTML-injection risk if
+      a story's URL (sourced from external RSS/API feeds) ever contained a
+      literal `"` character.
+
+### This session — 2026-09-16, part 13 (edit panel metadata)
+- [x] Added a Source/Author/Published/Collected metadata block to the edit
+      panel, right below the source-article link (`#edit-meta`, a `<dl>`
+      in `index.html`; `renderEditMetaHtml()`/`formatDateTime()` in
+      `app.js`). `published_at` and `source_name` were already exposed by
+      the API; added `author` and `collected_at` ("when we took it") to
+      `_serialize_episode`'s per-story entry (`app/main.py`) since those
+      weren't returned before. Dates formatted via
+      `toLocaleString()` for readability; missing values (author is often
+      null) render as "—" rather than blank/undefined.
+
+### This session — 2026-09-16, part 14 (discovery channel vs. resolved publisher)
+- [x] Added a conditional "Discovered via" row to the edit panel's
+      metadata block, linking back to the actual discovery page -- e.g. a
+      story surfaced via Hacker News but published elsewhere now shows
+      both "Source: nathannaveen.dev" (the resolved publisher, from
+      `resolve_publisher()` -- see part 6) AND "Discovered via: Hacker
+      News ↗" linking to `https://news.ycombinator.com/item?id={hn_id}`.
+      New `_discovery_info()` helper (`app/main.py`) returns this only
+      when `source_type == "hackernews"`; `None` (row omitted) for
+      directly-ingested RSS stories, which have no separate discovery
+      channel to show. Verified via the live API: a real HN-discovered
+      story returns the expected `{"label": "Hacker News", "url": "...
+      item?id=49697477"}`, a plain RSS story returns `discovery: None`.
+      Written generically (keyed off `source_type`, not hardcoded to HN)
+      so a future non-RSS aggregator source only needs one more branch
+      in `_discovery_info()`, not dashboard changes.
+
+### This session — 2026-09-16, part 15 (Produce was silently discarding edited scripts)
+- [x] **Critical bug found and fixed, user-reported:** edited story #46's
+      summary/script in the dashboard, clicked Save, clicked Produce --
+      the video used the OLD auto-generated text, and reopening the edit
+      panel showed the OLD text again too, as if the edit never happened.
+      Root cause: `_produce_story_content()` (`app/tasks/episode_video.py`,
+      used by episode-level Produce) unconditionally called
+      `generate_script()` from the story's original RSS title/summary on
+      **every** call, regardless of whether a script already existed --
+      silently overwriting a human-edited script (which the edit panel's
+      `PATCH /stories/{id}/content` deliberately preserves, only clearing
+      the downstream audio/image/captions/video to force those to
+      regenerate *from* the edit) with the auto-generated template text.
+      The edit panel then correctly displayed whatever was actually in
+      the DB -- which was the just-clobbered auto text, not a caching or
+      rendering bug on the frontend.
+- [x] Fixed by skipping script (re)generation whenever
+      `content.script_text` is already populated -- covers both the
+      edit-preservation case and, as a side benefit, a retry after a
+      failure at the voice/visual/video stage (no longer wastefully/
+      riskily redoes script generation it didn't need to). Applied the
+      identical fix to `generate_script_task`
+      (`app/tasks/content.py`, the single-story `POST /stories/{id}/produce`
+      path) since it had the exact same unconditional-regeneration bug,
+      even though the dashboard doesn't call that endpoint directly.
+- [x] Verified end-to-end by reproducing the user's exact report: PATCHed
+      story 46 with their exact summary/script text, confirmed the PATCH
+      response showed `status: script_ready`; triggered episode 5's
+      Produce; confirmed after completion that `GET /stories/46/content`
+      still shows the **exact edited text** in both `summary` and
+      `script_text`, `status: video_ready`, and a fresh `audio_duration_seconds`/
+      `video_url`/`updated_at` -- proving voice/visual/video were correctly
+      regenerated *from* the edited script, not from a re-run of the
+      auto-generator.
+
+### This session — 2026-09-16, part 16 (edit panel Close button placement)
+- [x] Moved the edit panel's Close button from the header's top-right into
+      the footer, right after Save (`index.html`/`style.css`) -- no JS
+      changes needed, same `#edit-close` element/id, just repositioned.
+
 ## Known issues / follow-ups
+
+- [ ] Reorder/swap/script-edit still don't mark `qa_status`/the new
+      staleness fields as stale -- only a completed Produce does (see part
+      11 above). Broadening this to reorder/swap/edit wasn't asked for yet;
+      revisit if it turns out to matter in practice.
+
+- [ ] Observed during dashboard click-testing: 1 of 25 stories in episode 5
+      (story #28, NVIDIA Blog) has script text "No summary was available
+      from the source." -- confirmed isolated (only 1 row across all of
+      `story_content` matches this), not investigated further since it's a
+      single-source RSS gap, not a UI or pipeline bug.
 
 - [ ] Caption timing in `compose_video_task` is a naive proportional estimate
       (sentence character-count share of total audio duration), not real

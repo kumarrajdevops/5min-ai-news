@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.content.script_generator import generate_script
@@ -68,17 +69,25 @@ def _produce_story_content(db, story: Story, content: StoryContent) -> bool:
     not allowed to block the rest of the episode).
     """
 
-    try:
-        script = generate_script(title=story.title, raw_summary=story.raw_summary)
-        content.headline = script["headline"]
-        content.summary = script["summary"]
-        content.script_text = script["script_text"]
-        content.status = "script_ready"
-        content.error_message = None
-        db.commit()
-    except Exception as exc:
-        mark_content_failed(db, content, "script", exc)
-        return False
+    # Skip regenerating the script if one already exists -- either from
+    # a prior run, or (critically) from a human edit via the dashboard's
+    # edit panel (PATCH /stories/{id}/content, which deliberately clears
+    # audio/image/captions/video to force those to regenerate FROM the
+    # edited script, but leaves script_text as the human wrote it).
+    # Regenerating unconditionally here would silently overwrite that
+    # edit with the auto-generated template text on every Produce call.
+    if not content.script_text:
+        try:
+            script = generate_script(title=story.title, raw_summary=story.raw_summary)
+            content.headline = script["headline"]
+            content.summary = script["summary"]
+            content.script_text = script["script_text"]
+            content.status = "script_ready"
+            content.error_message = None
+            db.commit()
+        except Exception as exc:
+            mark_content_failed(db, content, "script", exc)
+            return False
 
     try:
         audio_path = MEDIA_ROOT / "audio" / f"{story.id}.mp3"
@@ -138,6 +147,15 @@ def produce_episode_video(episode_id: int) -> dict:
     reused as-is, not regenerated. Fault-isolated: a story whose
     pipeline fails is skipped from the final video rather than
     blocking the rest of the episode.
+
+    After the primary video is ready, also produces (or reuses) the
+    5 backup stories' content, best-effort. This is deliberately a
+    second phase that runs after the primary video is already
+    committed as "ready" -- so a slow or failing backup can never
+    delay or block the primary episode -- and it exists so that a
+    later dashboard swap (a backup replacing a defective primary
+    story) is instant instead of triggering a slow on-demand
+    regeneration at the last minute.
     """
 
     with SessionLocal() as db:
@@ -225,12 +243,46 @@ def produce_episode_video(episode_id: int) -> dict:
             concat_videos(video_paths, output_path)
             episode.video_path = str(output_path)
             episode.video_status = "ready"
+            episode.video_produced_at = datetime.now(timezone.utc)
             db.commit()
         except Exception as exc:
             episode.video_status = "failed"
             db.commit()
             print(f"[episode_video] Concat failed for episode {episode_id}: {exc}")
             return {"episode_id": episode_id, "status": "failed", "error": f"concat failed: {exc}"}
+
+        # Second phase: best-effort produce the 5 backup stories too,
+        # now that the primary video is already ready. Never appends
+        # to video_paths (already consumed by concat_videos above) and
+        # never fails the episode -- a backup with no/failed content
+        # just means a future swap won't be instant for that one story.
+        backup_rows = (
+            db.query(EpisodeStory, Story)
+            .join(Story, EpisodeStory.story_id == Story.id)
+            .filter(
+                EpisodeStory.episode_id == episode_id,
+                EpisodeStory.selection_status == "backup",
+            )
+            .order_by(EpisodeStory.rank_position.asc())
+            .all()
+        )
+
+        backups_succeeded = 0
+        backups_skipped_existing = 0
+        backups_failed = 0
+
+        for episode_story, story in backup_rows:
+            content = get_or_create_content(db, story.id)
+
+            if content.status == "video_ready" and content.video_path:
+                backups_skipped_existing += 1
+                continue
+
+            if _produce_story_content(db, story, content):
+                backups_succeeded += 1
+            else:
+                backups_failed += 1
+                print(f"[episode_video] Backup story {story.id} failed for episode {episode_id} (non-fatal)")
 
     result = {
         "episode_id": episode_id,
@@ -239,6 +291,10 @@ def produce_episode_video(episode_id: int) -> dict:
         "stories_produced": succeeded,
         "stories_reused": skipped_existing,
         "stories_failed": failed,
+        "backups_total": len(backup_rows),
+        "backups_produced": backups_succeeded,
+        "backups_reused": backups_skipped_existing,
+        "backups_failed": backups_failed,
         "video_path": str(output_path),
     }
 

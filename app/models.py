@@ -138,6 +138,18 @@ class Episode(Base):
 
     qa_report: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Set when produce_episode_video last successfully completed /
+    # when run_episode_qa last completed -- compared by the dashboard
+    # to flag a QA result as stale (video was reproduced since QA last
+    # ran). See app/tasks/episode_video.py and app/tasks/episode_qa.py.
+    video_produced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    qa_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
 
 class EpisodeStory(Base):
     """

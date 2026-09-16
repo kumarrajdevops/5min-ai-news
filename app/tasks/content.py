@@ -48,6 +48,14 @@ def generate_script_task(story_id: int) -> dict:
     """
     Stage 1 of 4: deterministic, template-based script generation.
     Chains into generate_voice_task on success.
+
+    Skips regeneration if a script already exists -- either from a
+    prior run, or (critically) from a human edit via the dashboard's
+    edit panel, which deliberately clears audio/image/captions/video to
+    force those to regenerate FROM the edited script, but leaves
+    script_text as the human wrote it. Regenerating unconditionally
+    here would silently overwrite that edit with the auto-generated
+    template text.
     """
 
     with SessionLocal() as db:
@@ -58,22 +66,23 @@ def generate_script_task(story_id: int) -> dict:
 
         content = get_or_create_content(db, story_id)
 
-        try:
-            script = generate_script(
-                title=story.title,
-                raw_summary=story.raw_summary,
-            )
+        if not content.script_text:
+            try:
+                script = generate_script(
+                    title=story.title,
+                    raw_summary=story.raw_summary,
+                )
 
-            content.headline = script["headline"]
-            content.summary = script["summary"]
-            content.script_text = script["script_text"]
-            content.status = "script_ready"
-            content.error_message = None
-            db.commit()
+                content.headline = script["headline"]
+                content.summary = script["summary"]
+                content.script_text = script["script_text"]
+                content.status = "script_ready"
+                content.error_message = None
+                db.commit()
 
-        except Exception as exc:
-            mark_content_failed(db, content, "script", exc)
-            return {"story_id": story_id, "status": "failed", "stage": "script"}
+            except Exception as exc:
+                mark_content_failed(db, content, "script", exc)
+                return {"story_id": story_id, "status": "failed", "stage": "script"}
 
     print(f"[content] Script generated for story {story_id}")
     generate_voice_task.delay(story_id)

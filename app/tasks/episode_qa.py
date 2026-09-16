@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.db import SessionLocal
@@ -50,6 +51,7 @@ def run_episode_qa(episode_id: int) -> dict:
 
         episode.qa_status = "passed" if overall_passed else "failed"
         episode.qa_report = json.dumps(checks)
+        episode.qa_run_at = datetime.now(timezone.utc)
         db.commit()
 
     result = {
