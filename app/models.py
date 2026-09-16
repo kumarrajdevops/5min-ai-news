@@ -126,6 +126,18 @@ class Episode(Base):
         nullable=False,
     )
 
+    # Automated Video QA (see app/qa/video_qa.py). pending -> passed/
+    # failed. qa_report is a JSON-serialized list of individual check
+    # results, stored as text (same pattern as the other audit-trail
+    # reason fields elsewhere in this schema).
+    qa_status: Mapped[str] = mapped_column(
+        String(50),
+        default="pending",
+        nullable=False,
+    )
+
+    qa_report: Mapped[str | None] = mapped_column(Text, nullable=True)
+
 
 class EpisodeStory(Base):
     """

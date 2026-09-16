@@ -1,3 +1,4 @@
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -17,6 +18,38 @@ def get_audio_duration_seconds(audio_path: Path) -> float:
         check=True,
     )
     return float(result.stdout.strip())
+
+
+def probe_video(video_path: Path) -> dict:
+    """
+    Inspect a video file via ffprobe: total duration, and which stream
+    types are present. Used by app/qa/video_qa.py's video-integrity
+    check -- a real, independent check of the actual file, not just
+    trusting that composition/concatenation reported success.
+    """
+
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-show_entries", "stream=codec_type",
+            "-of", "json",
+            str(video_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    data = json.loads(result.stdout)
+    codec_types = {stream.get("codec_type") for stream in data.get("streams", [])}
+
+    return {
+        "duration_seconds": float(data.get("format", {}).get("duration", 0.0)),
+        "has_video": "video" in codec_types,
+        "has_audio": "audio" in codec_types,
+    }
 
 
 def _format_srt_timestamp(seconds: float) -> str:

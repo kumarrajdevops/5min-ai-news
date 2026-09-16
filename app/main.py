@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from app.db import SessionLocal
 from app.models import Episode, EpisodeStory, Story, StoryContent
 from app.tasks.content import generate_script_task
 from app.tasks.dedup import deduplicate_new_stories
+from app.tasks.episode_qa import run_episode_qa
 from app.tasks.episode_video import produce_episode_video
 from app.tasks.ingestion import ingest_news
 from app.tasks.ingestion_hackernews import ingest_hackernews_stories
@@ -141,6 +143,23 @@ def trigger_episode_production(episode_id: int):
     return {"episode_id": episode_id, "task_id": task.id, "status": "queued"}
 
 
+@app.post("/api/v1/episodes/{episode_id}/qa")
+def trigger_episode_qa(episode_id: int):
+    """
+    Run Automated Video QA (project.md's checklist) against an
+    already-produced episode. Does not produce anything itself --
+    run POST /api/v1/episodes/{id}/produce first.
+    """
+    with SessionLocal() as db:
+        episode = db.get(Episode, episode_id)
+
+        if episode is None:
+            raise HTTPException(status_code=404, detail="Episode not found.")
+
+    task = run_episode_qa.delay(episode_id)
+    return {"episode_id": episode_id, "task_id": task.id, "status": "queued"}
+
+
 @app.get("/api/v1/episodes/latest")
 def get_latest_episode():
     """
@@ -214,6 +233,8 @@ def _serialize_episode(db, episode: Episode) -> dict:
         "backup_count": len(backup),
         "video_status": episode.video_status,
         "video_url": f"/{episode.video_path}" if episode.video_path else None,
+        "qa_status": episode.qa_status,
+        "qa_report": json.loads(episode.qa_report) if episode.qa_report else None,
         "primary": primary,
         "backup": backup,
     }

@@ -219,8 +219,9 @@ deleting history, so it stays a running log.
       6:05, 7.4MB, confirmed via `ffprobe`). Re-ran immediately after --
       correctly reused all 25 (`stories_produced: 0, stories_reused: 25`),
       confirming idempotency.
-- [ ] Still a straight concatenation only -- no intro/outro, transitions, or
-      episode-level branding. That's a separate, not-yet-built piece.
+- [x] ~~Still a straight concatenation only -- no intro/outro~~ -- intro/outro
+      added, see "part 8" directly below. Transitions/background music
+      remain out of scope (see part 8's own note).
 
 ### This session — 2026-09-15, part 8 (episode-level intro/outro branding)
 - [x] Added narrated intro/outro clips to the combined episode video, so it
@@ -245,6 +246,34 @@ deleting history, so it stays a running log.
 - [ ] Still no transitions between segments (hard cut only) and no
       background music (deliberately out of scope -- licensing complexity
       for royalty-free audio, not attempted).
+
+### This session — 2026-09-15/16, part 9 (Automated Video QA)
+- [x] Built the architecture's Automated Video QA stage (`app/qa/video_qa.py`,
+      `app/tasks/episode_qa.py`, `POST /api/v1/episodes/{id}/qa`) --
+      implements every checkmark from `project.md`'s QA checklist: story
+      count, AI-only, source links, captions present, audio present, video
+      integrity, duration target. Each check independently re-verifies real
+      state (actual files on disk, real `ffprobe` stream inspection) rather
+      than trusting an earlier stage's own success report.
+- [x] "Verified sources" is explicitly reported as **not implemented**
+      (`passed: None`, doesn't count as a failure) rather than faked as a
+      pass -- there's no Verification Engine built yet (see "Next up"
+      below). Honest gap, not silently skipped.
+- [x] Duration target set to 300s (5 min), from the project's own name
+      ("5min-ai-news") and `proposal.md`'s "<5 minute requirement" framing
+      -- not tuned to make current episodes pass.
+- [x] Verified end-to-end on episode 5: 7/8 checks pass cleanly (story
+      count 25/25, AI-only, source links, captions, audio, video integrity
+      all real PASS). **duration_target genuinely FAILS** -- 378.7s vs the
+      300s target. This is an honest, expected result (not a bug): 25
+      stories' worth of narration plus intro/outro naturally runs long
+      without per-story time budgeting, exactly the gap `proposal.md`'s
+      "episode budgeting / variable story durations" section already
+      flagged. Confirms QA is measuring something real, not rubber-stamping.
+- [ ] Not addressed here: fixing the duration overage itself (needs
+      variable per-story time budgets or fewer/shorter segments -- a
+      content-pipeline change, not a QA change) and building the
+      Verification Engine so "source_verification" can become a real check.
 
 ## Known issues / follow-ups
 
@@ -287,12 +316,22 @@ deleting history, so it stays a running log.
 - [ ] Scheduled collection cycle (10 PM / 1 AM / 3:30 AM IST cutoff) — all
       pipeline stages are currently triggered manually via `curl`
 
-## Future phases (per `project.md`, not started)
+## Future phases (per `project.md`)
 
-- [ ] Script Generation (fact-based script: headline, summary, why it matters, sources)
-- [ ] Voice Generation (one branded AI voice)
-- [ ] Visual/Asset Engine (avatar, visuals, screenshots, motion graphics, music)
-- [ ] Video Composition (voice + visuals + avatar + captions + branding)
+Script/Voice/Visual/Video are now built in simplified/free form, at
+full-episode scale, with episode branding -- see parts 5-8 above.
+Noting here what's still genuinely missing from each, since the
+original `project.md` description was broader than what's built:
+
+- [~] Script Generation -- deterministic headline + summary only, no
+      LLM/fact-extraction, no "why it matters" (deliberately removed
+      per user direction), no explicit source citation in the spoken
+      narration (source is shown on-screen in the visual card only).
+- [x] Voice Generation -- one branded AI voice (edge-tts), as designed.
+- [~] Visual/Asset Engine -- static branded title cards only. No avatar,
+      no screenshots, no motion graphics, no background music.
+- [~] Video Composition -- voice + visuals + captions + episode-level
+      branding (intro/outro) all working. No avatar, no transitions.
 - [ ] Automated Video QA (story count, AI-only, sources, captions, audio, duration)
 - [ ] Final Human Approval workflow
 - [ ] Publishing Worker (YouTube + Instagram)

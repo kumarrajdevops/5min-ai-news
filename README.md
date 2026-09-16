@@ -107,6 +107,19 @@ closes with a narrated outro ("That's all for today's AI Daily 25.
 See you tomorrow.") -- still a straight concatenation otherwise, no
 transitions or background music.
 
+**Automated Video QA.** Once an episode is produced, validate it
+against the architecture's QA checklist (story count, AI-only, source
+links, captions/audio present, video integrity, duration target):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/episodes/{episode_id}/qa
+```
+
+Poll `GET /api/v1/episodes/{episode_id}` for `qa_status`
+(`pending` -> `passed`/`failed`) and `qa_report` (per-check pass/fail
+detail). `source_verification` always reports as not implemented --
+there's no Verification Engine yet -- rather than faking a pass.
+
 All four stages are free/local, no API keys required:
 
 - **Script** -- deterministic, template-based: headline + a

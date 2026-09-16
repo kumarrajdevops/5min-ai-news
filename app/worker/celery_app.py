@@ -13,6 +13,7 @@ celery_app = Celery(
         "app.tasks.ranking",
         "app.tasks.content",
         "app.tasks.episode_video",
+        "app.tasks.episode_qa",
     ],
 )
 
