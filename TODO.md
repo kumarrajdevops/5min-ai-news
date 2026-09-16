@@ -860,8 +860,57 @@ deleting history, so it stays a running log.
       normally after the change (real runs, sane insert/duplicate
       counts, zero unexpected errors).
 
-Per current standing instruction, none of this session's changes were
-committed -- left staged/unstaged for the user to review.
+Committed as `a71ea3c` once the user asked for it explicitly (per
+current standing instruction, never committed proactively).
+
+### This session — 2026-09-17, part 24 (first automated test suite)
+
+- [x] Added `tests/` (pytest, 55 tests, `requirements-dev.txt`) --
+      addresses the "no automated tests" known issue below, though
+      scoped to the deterministic logic layer + targeted regression
+      tests, not the full Celery/API surface (see what's NOT covered,
+      noted below).
+      - Pure unit tests, no DB/network/ffmpeg needed: AI-relevance
+        filter, dedup similarity/matching, ranking engine (all 4
+        sub-scores + the blended total), script generation (including
+        direct regression cases for this session's truncation-marker
+        and promo-sentence fixes), publisher resolution.
+      - `tests/conftest.py`'s `db_session` fixture: an in-memory SQLite
+        database for testing functions that take `db` as an explicit
+        parameter (e.g. `_produce_story_content`) without touching the
+        real Postgres database. Verified this is a faithful stand-in
+        for the actual bugs being guarded against -- SQLAlchemy raises
+        the same `IntegrityError` on a unique-constraint violation
+        under SQLite as under Postgres.
+      - Direct regression tests for the 3 hardest-won bugs this
+        session found by hand: the AV-duration desync (real ffmpeg via
+        `compose_video`/`generate_gap_clip`, not mocked -- generates a
+        real synthetic audio+image, asserts output duration matches
+        within one frame), the script-clobbering bug (`_produce_story_
+        content` preserves an edited script, still regenerates voice/
+        visual/video from it, and separately still generates a script
+        for a genuinely new story -- 3 tests covering the edit case,
+        the new-story case, and the retry-after-failure case so the
+        fix doesn't overcorrect), and the ingestion race condition
+        (per-row commit + narrow `except IntegrityError` isolates one
+        collision from other valid inserts in the same batch).
+      - **Verified the regression tests actually regress, not just
+        pass tautologically**: temporarily reintroduced the exact old
+        script-clobbering bug (reverted the `if not content.script_
+        text:` guard), confirmed 2 of 3 tests in that file immediately
+        failed, then restored the real fix and confirmed all 55 pass
+        again. Didn't just trust that the tests "look right."
+      - Documented how to run them in `README.md` (`pip install -r
+        requirements-dev.txt` + `pytest` inside the `api` container, no
+        separate test database needed).
+- [ ] **Not covered by this pass**: the Celery task orchestration layer
+      itself end-to-end (`produce_episode_video`, `ingest_news`, `run_
+      ranking_selection` as whole tasks -- these open their own
+      `SessionLocal()` internally rather than accepting `db` as a
+      parameter, which would need either monkeypatching `SessionLocal`
+      per-module or a refactor to accept an injected session) and the
+      FastAPI endpoints (`app/main.py`) themselves. A reasonable next
+      layer to add, not attempted in this pass.
 
 ## Known issues / follow-ups
 
@@ -878,8 +927,12 @@ committed -- left staged/unstaged for the user to review.
       -- resolved, see "part 7 (full-episode video production)" above.
 
 - [x] ~~`worker` container runs Celery as root~~ -- fixed, see "part 23" above.
-- [ ] No automated tests exist yet for ingestion/dedup/ranking logic — all
-      verification so far has been manual end-to-end runs against live RSS feeds
+- [x] ~~No automated tests exist yet for ingestion/dedup/ranking logic~~
+      -- a first test suite now covers the deterministic logic layer
+      (ai-relevance, dedup, ranking) plus 3 targeted regression tests
+      for this session's hardest-won bugs, see "part 24" above. Still
+      genuinely open: task-orchestration-level and API-endpoint-level
+      tests (noted as not-yet-covered in that same entry).
 - [x] ~~Two RSS sources are disabled and need real fixes~~ -- Microsoft
       fixed (real replacement feed), VentureBeat re-confirmed still
       blocked and deliberately left disabled -- see "part 23" above.

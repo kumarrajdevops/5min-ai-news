@@ -1,0 +1,6 @@
+# Test-only dependencies -- not needed to run the app itself, only to
+# run the test suite (see tests/ and TODO.md's "No automated tests"
+# entry). Kept separate from requirements.txt so the production image
+# doesn't carry test tooling.
+-r requirements.txt
+pytest==8.3.5

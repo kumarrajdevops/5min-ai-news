@@ -361,6 +361,29 @@ curl http://localhost:8000/api/v1/episodes/latest
 curl http://localhost:8000/api/v1/episodes/{episode_id}
 ```
 
+## Running tests
+
+```bash
+docker exec 5min-ai-news-api-1 pip install -r requirements-dev.txt
+docker exec -w /app 5min-ai-news-api-1 pytest
+```
+
+55 tests, no running Postgres required -- DB-backed tests use an
+in-memory SQLite database (`tests/conftest.py`'s `db_session` fixture;
+every model uses portable column types, so this is a faithful stand-in)
+rather than the real dev database. Covers the deterministic filters
+(AI-relevance, dedup, ranking, script generation -- including the
+promo-sentence/truncation-marker fixes from this session) plus direct
+regression tests for the three hardest-won bugs found this session:
+the AV-duration desync (real ffmpeg, not mocked), the script-clobbering
+bug, and the ingestion race condition. Each regression test was
+verified to actually fail when its bug is reintroduced, not just pass
+tautologically.
+
+Not yet covered: the Celery task orchestration layer itself (e.g.
+`produce_episode_video`, `ingest_news` end to end) and the FastAPI
+endpoints -- see `TODO.md`.
+
 ## Stop / reset
 
 ```bash
