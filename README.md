@@ -9,6 +9,36 @@ generation → Automated QA → human review (Editorial Dashboard) →
 > container prefixes, etc.) is `5min-ai-news`. "AI News Platform" is
 > the production/public brand name for the same project.
 
+## No LLM in the pipeline
+
+"AI News" describes the subject matter, not the implementation. Every
+decision-making and content-generation stage is deterministic and
+rule-based -- same input always produces the same output, fully
+explainable, nothing that can hallucinate or vary run to run:
+
+| Stage | How it works | AI/LLM involved? |
+|---|---|---|
+| Ingestion (RSS, Hacker News) | `feedparser`/`requests`, plain HTTP | No |
+| AI-relevance filter | Regex keyword matching against a fixed word list | No |
+| Deduplication | Title string-similarity + time window | No |
+| Ranking | A fixed scoring formula (recency, source credibility, momentum) | No |
+| Script generation | String templates from the raw RSS/article text | No |
+| Voice synthesis | Microsoft's `edge-tts` neural voice (`en-US-GuyNeural`) | **Yes -- the one exception** |
+| Visual card | Pillow drawing text on a static template | No |
+| Video composition | ffmpeg | No |
+| Automated QA | File/duration checks via `ffprobe` | No |
+
+Voice synthesis is real ML inference (a genuine neural text-to-speech
+model, free, no API key) -- but it's pure speech synthesis, not an
+LLM. It doesn't understand, generate, or reason about anything; it
+just converts the already-deterministic script text into audio.
+
+No OpenAI/Anthropic/Gemini/any LLM SDK appears in `requirements.txt`
+or anywhere in `app/` -- every source hit for words like "openai" or
+"claude" in the code is either a *news source name* (OpenAI's own blog
+is an RSS source) or a *keyword in the topic classifier* (detecting
+whether an article is about AI), never a call to an AI API.
+
 ## Current slice
 
 - FastAPI API
