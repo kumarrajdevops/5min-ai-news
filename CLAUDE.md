@@ -81,7 +81,20 @@ Don't re-diagnose from scratch.
    several of the bugs above were only caught because the user tested
    the actual output, not because a code review caught them first.
 
-8. **Don't silently expand scope.** If an audit or investigation
+8. **Never run more than one `beat` replica.** `celery beat`
+   (`docker-compose.yml`'s `beat` service, schedule in
+   `app/worker/celery_app.py`) only decides *when* a scheduled task
+   should run and enqueues it once — a second instance would
+   double-enqueue every scheduled job (double ingestion, double
+   nightly-cutoff episodes). `worker` can safely scale to multiple
+   replicas; `beat` cannot. `beat` is deliberately gated behind the
+   `scheduler` Compose profile — real scheduling is a production
+   concern, not something that should fire unprompted during dev
+   testing. Plain `docker compose up -d` does not start it; use
+   `docker compose up -d beat` (or `--profile scheduler`) only when you
+   actually want the nightly jobs running.
+
+9. **Don't silently expand scope.** If an audit or investigation
    surfaces a second, related issue, report it and ask (or fix it only
    if clearly low-risk and directly in the spirit of what was asked) —
    don't just fix everything you notice in the same pass without saying so.

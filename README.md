@@ -55,6 +55,47 @@ curl http://localhost:8000/health
 
 OpenAPI docs: http://localhost:8000/docs
 
+## Scheduled Daily News Cycle
+
+The full cycle (three overnight collection passes, then a cutoff that
+ranks/produces/QAs the episode) is built and verified, via a `celery
+beat` process:
+
+| Time (IST) | What runs |
+|---|---|
+| 10:00 PM | Collect (RSS + Hacker News) |
+| 1:00 AM | Collect again |
+| 3:30 AM | Final collection |
+| 4:00 AM | **Cutoff**: rank + select Top 25 + 5 backups -> produce the episode video -> run QA |
+
+Human approval (the step before the 6 AM IST publish target) is still a
+manual dashboard action -- the scheduled cutoff stops once the episode
+is produced and QA'd, ready for review.
+
+**Not started by default** -- real scheduling is a production concern,
+not something that should fire unprompted during dev/testing just
+because the stack happens to be up at those IST times. Plain
+`docker compose up -d` (per "First-time setup" above) brings up
+`postgres`/`redis`/`api`/`worker` only. Start the scheduler
+deliberately, whenever you actually want it running:
+
+```bash
+docker compose up -d beat                  # just the scheduler
+# or
+docker compose --profile scheduler up -d   # everything, beat included
+```
+
+`beat` only decides *when* a task should run and enqueues it -- `worker`
+is what executes it, and must be up too. `docker compose stop beat`
+turns scheduling back off without touching anything else. Times are
+evaluated in `Asia/Kolkata` regardless of the host/container's system
+clock (verified directly, not just assumed from config -- see
+`TODO.md`).
+
+Everything below (manual ingest/produce/QA endpoints) still works the
+same way and is useful for testing, backfilling, or triggering a step
+out of cycle.
+
 ## Running the pipeline
 
 **1. Ingest news** (pulls from all enabled RSS sources, filters for

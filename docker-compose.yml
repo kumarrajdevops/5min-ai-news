@@ -74,5 +74,43 @@ services:
       redis:
         condition: service_healthy
 
+  # Fires the Daily News Cycle's scheduled jobs (see
+  # app/worker/celery_app.py's beat_schedule and project.md's "Daily
+  # Execution Architecture") -- collection passes at 10 PM/1 AM/3:30 AM
+  # IST, then the 4 AM IST cutoff (rank -> produce -> QA). A separate
+  # process from `worker`: beat only decides *when* a task should run
+  # and enqueues it; `worker` is what actually executes it. Running
+  # beat more than once would enqueue every scheduled task multiple
+  # times, so this must stay a single replica.
+  #
+  # Real scheduling is a production concern -- during dev/testing we
+  # don't want the nightly jobs firing unprompted just because the
+  # stack happens to be up at those IST times. The "scheduler" profile
+  # keeps this out of a plain `docker compose up -d`; start it
+  # deliberately with either:
+  #   docker compose --profile scheduler up -d   (everything, beat included)
+  #   docker compose up -d beat                  (just beat -- naming a
+  #                                                service explicitly
+  #                                                starts it regardless
+  #                                                of active profiles)
+  beat:
+    profiles: ["scheduler"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.worker.celery_app beat --loglevel=INFO
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:

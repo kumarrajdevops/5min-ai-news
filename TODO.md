@@ -739,6 +739,60 @@ deleting history, so it stays a running log.
         proactively after pipeline changes or when the user reports a
         produced episode looking/sounding wrong.
 
+### This session — 2026-09-16, part 22 (scheduled Daily News Cycle)
+- [x] Built the architecture's Daily News Cycle (`project.md`'s three
+      overnight collection passes + 4 AM IST cutoff) via Celery Beat --
+      a `beat` service (`docker-compose.yml`), fires the existing
+      `ingest_news`/`ingest_hackernews_stories` tasks at 10 PM/1 AM/
+      3:30 AM IST, then a new orchestrating task,
+      `run_nightly_cutoff` (`app/tasks/scheduled.py`), at 4 AM IST:
+      rank + select -> produce the episode video -> run QA,
+      sequentially. Calls each stage's function directly (not via
+      `.delay()`) since produce needs the specific `episode_id`
+      ranking just created and must genuinely wait for it -- same
+      "call it in-process, don't auto-chain" rationale already used by
+      `_produce_story_content`. Stops once QA'd; human approval stays
+      a manual dashboard action, unchanged.
+- [x] `celery_app.conf.timezone = "Asia/Kolkata"` was already set (from
+      an earlier session) -- verified it actually works before relying
+      on it: `celery_app.now()` correctly returns Asia/Kolkata time
+      regardless of the container's UTC system clock, so
+      `crontab(hour=22, minute=0)` genuinely means 10 PM IST, not 10
+      PM UTC. `beat`'s own "LocalTime" log line is just the OS clock
+      (UTC) -- a display artifact, not what's actually used for
+      scheduling.
+- [x] **Verified for real, not just configured**: added a temporary
+      one-off schedule entry firing ~1 minute out, confirmed via logs
+      that `beat` enqueued it and `worker` executed it (a real
+      `ingest_news` run, 26 articles inserted, correctly auto-chained
+      into dedup), then removed the test entry. Separately,
+      manually triggered the new `run_nightly_cutoff` task directly:
+      created episode #6 (51 eligible, 25 primary + 5 backup),
+      produced 25 primary + 5 backup stories (0 failures) in ~120s,
+      ran QA (same expected `duration_target`-only failure as every
+      other episode this session). Confirmed episode #6 via the public
+      API: `video_status: ready`, playable `video_url`, full QA report.
+- [ ] Added `celerybeat-schedule*` to `.gitignore` (beat's local
+      last-run-time state file, written to the bind-mounted project
+      root by default -- not something to commit).
+- [x] ~~Running `beat` continuously in local dev means these jobs will
+      actually fire whenever the stack happens to be up~~ -- user
+      flagged this directly: real scheduling should be a production
+      concern, not something firing unprompted during dev testing.
+      Fixed by gating `beat` behind Compose's `scheduler` profile
+      (`docker-compose.yml`) -- plain `docker compose up -d` (the
+      normal dev command) no longer starts it at all; `docker compose
+      up -d beat` (explicit name) or `--profile scheduler` starts it
+      deliberately when actually wanted. Verified all three states
+      directly: stopped the already-running container, confirmed a
+      plain `up -d` does not recreate it, confirmed `up -d beat` still
+      starts it despite no active profile (Compose's documented
+      behavior -- naming a service explicitly bypasses profile
+      filtering), stopped it again afterward to leave the repo in its
+      intended off-by-default state. No changes to the schedule itself
+      or `app/tasks/scheduled.py` -- purely gating whether the process
+      that reads it runs by default.
+
 ## Known issues / follow-ups
 
 - [ ] Reorder/swap/script-edit still don't mark `qa_status`/the new
@@ -757,11 +811,10 @@ deleting history, so it stays a running log.
       forced alignment against the TTS engine's actual word timings --
       captions will drift out of sync on longer/uneven sentences. Real
       alignment is future work.
-- [ ] Composed video duration (`ffprobe` on the final mp4) doesn't exactly
-      match the source audio duration stored on `story_content` (seen: audio
-      29.7s vs muxed video 31.4s) -- likely `-shortest`/keyframe rounding in
-      the ffmpeg compose step. Cosmetic, didn't affect playback, not
-      root-caused yet.
+- [x] ~~Composed video duration doesn't exactly match the source audio
+      duration~~ -- root-caused and fixed, see "part 19" above (was
+      `-shortest` overrunning by 1-2s/clip, not simple rounding;
+      accumulated to a ~34s desync across a full episode before the fix).
 - [x] ~~Script/voice/visual/video pipeline is scoped to one story at a time~~
       -- resolved, see "part 7 (full-episode video production)" above.
 
@@ -786,10 +839,10 @@ deleting history, so it stays a running log.
 - [ ] Verification Engine (cross-source confirmation before a story is
       publishable) — currently the pipeline ranks AI-candidate stories directly,
       with no separate verified/unverified gate
-- [ ] Editorial Dashboard (human review of Top 30: edit, reorder, replace
-      defective stories with backups, approve/reject)
-- [ ] Scheduled collection cycle (10 PM / 1 AM / 3:30 AM IST cutoff) — all
-      pipeline stages are currently triggered manually via `curl`
+- [x] ~~Editorial Dashboard~~ -- built, see "part 10" onward above.
+- [x] ~~Scheduled collection cycle~~ -- built via Celery Beat, see
+      "part 22" above. Human approval remains manual, per the
+      architecture.
 
 ## Future phases (per `project.md`)
 

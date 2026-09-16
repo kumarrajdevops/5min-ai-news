@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 venv/
 *.log
+celerybeat-schedule*
 .DS_Store
 media/
 .idea/
