@@ -12,6 +12,7 @@ celery_app = Celery(
         "app.tasks.dedup",
         "app.tasks.ranking",
         "app.tasks.content",
+        "app.tasks.episode_video",
     ],
 )
 

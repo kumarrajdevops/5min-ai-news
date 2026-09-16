@@ -9,6 +9,7 @@ from app.db import SessionLocal
 from app.models import Episode, EpisodeStory, Story, StoryContent
 from app.tasks.content import generate_script_task
 from app.tasks.dedup import deduplicate_new_stories
+from app.tasks.episode_video import produce_episode_video
 from app.tasks.ingestion import ingest_news
 from app.tasks.ingestion_hackernews import ingest_hackernews_stories
 from app.tasks.ranking import run_ranking_selection
@@ -122,6 +123,24 @@ def trigger_ranking_selection(run_date: str | None = None):
     return {"task_id": task.id, "status": "queued"}
 
 
+@app.post("/api/v1/episodes/{episode_id}/produce")
+def trigger_episode_production(episode_id: int):
+    """
+    Produce (or reuse) content for every primary story in the episode
+    and concatenate the results into one combined episode video (see
+    app/tasks/episode_video.py). Idempotent -- stories that already
+    have video_ready content are reused, not regenerated.
+    """
+    with SessionLocal() as db:
+        episode = db.get(Episode, episode_id)
+
+        if episode is None:
+            raise HTTPException(status_code=404, detail="Episode not found.")
+
+    task = produce_episode_video.delay(episode_id)
+    return {"episode_id": episode_id, "task_id": task.id, "status": "queued"}
+
+
 @app.get("/api/v1/episodes/latest")
 def get_latest_episode():
     """
@@ -193,6 +212,8 @@ def _serialize_episode(db, episode: Episode) -> dict:
         "created_at": episode.created_at,
         "primary_count": len(primary),
         "backup_count": len(backup),
+        "video_status": episode.video_status,
+        "video_url": f"/{episode.video_path}" if episode.video_path else None,
         "primary": primary,
         "backup": backup,
     }

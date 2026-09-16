@@ -61,6 +61,47 @@ def build_captions(script_text: str, duration_seconds: float, output_path: Path)
             f.write(f"{sentence}\n\n")
 
 
+def concat_videos(video_paths: list[Path], output_path: Path) -> None:
+    """
+    Concatenate multiple already-composed story videos into one, in
+    the given order, via ffmpeg's concat demuxer with stream copy (no
+    re-encoding -- fast and lossless, safe here because every story
+    video comes from the same compose_video() call above, so codec/
+    resolution/pixel format always match).
+
+    This is a straight concatenation only -- no intro/outro,
+    transitions, or episode-level branding. That's a separate,
+    not-yet-built piece of the architecture (see TODO.md).
+    """
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # The concat demuxer resolves each `file` entry relative to the
+    # list file's own directory, so write the list next to the
+    # per-story videos and reference them by filename only.
+    list_path = video_paths[0].parent / f"_concat_{output_path.stem}.txt"
+
+    with open(list_path, "w", encoding="utf-8") as f:
+        for path in video_paths:
+            f.write(f"file '{path.name}'\n")
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", str(list_path),
+                "-c", "copy",
+                str(output_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        list_path.unlink(missing_ok=True)
+
+
 def compose_video(
     image_path: Path,
     audio_path: Path,

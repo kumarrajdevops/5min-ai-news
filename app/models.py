@@ -115,6 +115,17 @@ class Episode(Base):
         nullable=False,
     )
 
+    # Final combined episode video -- all primary stories' individual
+    # videos concatenated in rank order. pending -> producing -> ready
+    # (or failed). See app/tasks/episode_video.py.
+    video_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    video_status: Mapped[str] = mapped_column(
+        String(50),
+        default="pending",
+        nullable=False,
+    )
+
 
 class EpisodeStory(Base):
     """

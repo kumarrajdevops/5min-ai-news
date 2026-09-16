@@ -196,6 +196,32 @@ deleting history, so it stays a running log.
       classification) -- a legitimate longer-term direction, needs its own
       dedicated planning pass.
 
+### This session — 2026-09-15, part 7 (full-episode video production)
+- [x] Scaled the script/voice/visual/video content pipeline from one story at
+      a time to a full episode: new `POST /api/v1/episodes/{id}/produce`
+      (`app/tasks/episode_video.py`) runs every primary story through the
+      same 4-stage pipeline sequentially and in-process (not via the
+      Celery-chained single-story tasks, which auto-chain async and would
+      break sequencing), then concatenates the results into one combined
+      episode video via `concat_videos()` (`app/content/video_composer.py`).
+      Idempotent (stories already `video_ready` are reused, not
+      regenerated) and fault-isolated (a failed story is skipped from the
+      final video rather than blocking the whole episode).
+- [x] Added `Episode.video_path` / `Episode.video_status` columns
+      (migration `a7c3d9e1f204`), exposed via `video_url`/`video_status` on
+      `GET /api/v1/episodes/{id}` and `/latest`.
+- [x] Shared helpers (`get_or_create_content`, `mark_content_failed`) were
+      de-underscored in `app/tasks/content.py` and reused directly, rather
+      than duplicating the DB-write/error-handling glue in the new task.
+- [x] Verified end-to-end on episode 5 (25 primary stories): first run --
+      11 newly produced, 14 reused from earlier single-story tests, **0
+      failures**, completed in 55s total; combined video valid (h264/aac,
+      6:05, 7.4MB, confirmed via `ffprobe`). Re-ran immediately after --
+      correctly reused all 25 (`stories_produced: 0, stories_reused: 25`),
+      confirming idempotency.
+- [ ] Still a straight concatenation only -- no intro/outro, transitions, or
+      episode-level branding. That's a separate, not-yet-built piece.
+
 ## Known issues / follow-ups
 
 - [ ] Caption timing in `compose_video_task` is a naive proportional estimate
@@ -208,11 +234,8 @@ deleting history, so it stays a running log.
       29.7s vs muxed video 31.4s) -- likely `-shortest`/keyframe rounding in
       the ffmpeg compose step. Cosmetic, didn't affect playback, not
       root-caused yet.
-- [ ] Script/voice/visual/video pipeline is scoped to **one story at a
-      time** -- not yet wired up to run across an entire Top-25 episode
-      (would need per-episode orchestration, likely a "compose full episode"
-      task that fans out to all 25 stories then concatenates/sequences the
-      results into one video).
+- [x] ~~Script/voice/visual/video pipeline is scoped to one story at a time~~
+      -- resolved, see "part 7 (full-episode video production)" above.
 
 - [ ] `worker` container runs Celery as root (harmless locally, but the image has
       no non-root user — should fix before any production deployment)

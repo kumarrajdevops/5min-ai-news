@@ -17,7 +17,11 @@ from app.worker.celery_app import celery_app
 MEDIA_ROOT = Path("media")
 
 
-def _get_or_create_content(db, story_id: int) -> StoryContent:
+def get_or_create_content(db, story_id: int) -> StoryContent:
+    """
+    Shared with app/tasks/episode_video.py -- not underscore-prefixed
+    since it's used across task modules, not just this one.
+    """
     content = (
         db.query(StoryContent)
         .filter(StoryContent.story_id == story_id)
@@ -32,7 +36,7 @@ def _get_or_create_content(db, story_id: int) -> StoryContent:
     return content
 
 
-def _mark_failed(db, content: StoryContent, stage: str, exc: Exception) -> None:
+def mark_content_failed(db, content: StoryContent, stage: str, exc: Exception) -> None:
     content.status = "failed"
     content.error_message = f"[{stage}] {exc}"
     db.commit()
@@ -52,7 +56,7 @@ def generate_script_task(story_id: int) -> dict:
         if story is None:
             return {"story_id": story_id, "status": "failed", "error": "Story not found"}
 
-        content = _get_or_create_content(db, story_id)
+        content = get_or_create_content(db, story_id)
 
         try:
             script = generate_script(
@@ -68,7 +72,7 @@ def generate_script_task(story_id: int) -> dict:
             db.commit()
 
         except Exception as exc:
-            _mark_failed(db, content, "script", exc)
+            mark_content_failed(db, content, "script", exc)
             return {"story_id": story_id, "status": "failed", "stage": "script"}
 
     print(f"[content] Script generated for story {story_id}")
@@ -105,7 +109,7 @@ def generate_voice_task(story_id: int) -> dict:
             db.commit()
 
         except Exception as exc:
-            _mark_failed(db, content, "voice", exc)
+            mark_content_failed(db, content, "voice", exc)
             return {"story_id": story_id, "status": "failed", "stage": "voice"}
 
     print(f"[content] Voice generated for story {story_id}")
@@ -141,7 +145,7 @@ def generate_visual_task(story_id: int) -> dict:
             db.commit()
 
         except Exception as exc:
-            _mark_failed(db, content, "visual", exc)
+            mark_content_failed(db, content, "visual", exc)
             return {"story_id": story_id, "status": "failed", "stage": "visual"}
 
     print(f"[content] Visual generated for story {story_id}")
@@ -189,7 +193,7 @@ def compose_video_task(story_id: int) -> dict:
             db.commit()
 
         except Exception as exc:
-            _mark_failed(db, content, "video", exc)
+            mark_content_failed(db, content, "video", exc)
             return {"story_id": story_id, "status": "failed", "stage": "video"}
 
     print(f"[content] Video composed for story {story_id}")

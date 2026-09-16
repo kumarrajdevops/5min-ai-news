@@ -64,13 +64,12 @@ window closes, not after every ingestion pass:
 curl -X POST http://localhost:8000/api/v1/episodes/select
 ```
 
-## Producing a story (script + voice + visual + video)
+## Producing content (script + voice + visual + video)
 
-**Proof-of-concept scope:** this pipeline currently runs on **one
-story at a time**, not yet the full Top-25 episode. Pick a
-`story_id` (e.g. from `/api/v1/episodes/latest`) and kick off the
-full chain -- script generation, then voice synthesis, then the
-visual card, then video composition, each auto-chained into the next:
+**Single story.** Pick a `story_id` (e.g. from `/api/v1/episodes/latest`)
+and kick off the full chain -- script generation, then voice synthesis,
+then the visual card, then video composition, each auto-chained into
+the next:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/stories/{story_id}/produce
@@ -84,9 +83,27 @@ or `failed` -- see `error_message`):
 curl http://localhost:8000/api/v1/stories/{story_id}/content
 ```
 
-The response includes playable URLs (served from `/media`, e.g.
-`http://localhost:8000/media/videos/{story_id}.mp4`) for the
-generated audio, image, captions, and final video.
+**Full episode.** Produce (or reuse) content for every primary story
+in an episode and concatenate the results into one combined video, in
+rank order:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/episodes/{episode_id}/produce
+```
+
+Idempotent -- stories that already have `video_ready` content are
+reused, not regenerated, so re-running after adding a few new stories
+only produces what's missing. Fault-isolated -- a story whose pipeline
+fails is skipped from the final video rather than blocking the whole
+episode. Poll `GET /api/v1/episodes/{episode_id}` for `video_status`
+(`pending` -> `producing` -> `ready`, or `failed`) and `video_url`.
+
+Both endpoints' responses include playable URLs (served from `/media`,
+e.g. `http://localhost:8000/media/videos/{story_id}.mp4` or
+`.../videos/episode_{episode_id}.mp4`) for the generated audio, image,
+captions, and video. The combined episode video is a straight
+concatenation only -- no intro/outro, transitions, or episode-level
+branding yet.
 
 All four stages are free/local, no API keys required:
 
