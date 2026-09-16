@@ -101,9 +101,11 @@ episode. Poll `GET /api/v1/episodes/{episode_id}` for `video_status`
 Both endpoints' responses include playable URLs (served from `/media`,
 e.g. `http://localhost:8000/media/videos/{story_id}.mp4` or
 `.../videos/episode_{episode_id}.mp4`) for the generated audio, image,
-captions, and video. The combined episode video is a straight
-concatenation only -- no intro/outro, transitions, or episode-level
-branding yet.
+captions, and video. The combined episode video opens with a narrated
+intro card ("AI Daily 25 -- [date] -- Today's Top 25 AI Stories") and
+closes with a narrated outro ("That's all for today's AI Daily 25.
+See you tomorrow.") -- still a straight concatenation otherwise, no
+transitions or background music.
 
 All four stages are free/local, no API keys required:
 

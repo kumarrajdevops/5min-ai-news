@@ -222,6 +222,30 @@ deleting history, so it stays a running log.
 - [ ] Still a straight concatenation only -- no intro/outro, transitions, or
       episode-level branding. That's a separate, not-yet-built piece.
 
+### This session — 2026-09-15, part 8 (episode-level intro/outro branding)
+- [x] Added narrated intro/outro clips to the combined episode video, so it
+      reads as one produced show rather than 25 stitched clips. New
+      `generate_branding_card()` (`app/content/visual_generator.py`) --
+      same visual style as the per-story card, minus the "Source: " framing
+      which doesn't apply here. New `_produce_branding_clip()` helper
+      (`app/tasks/episode_video.py`) reuses the existing voice/caption/
+      compose pure functions, same as a story's pipeline, just not tied to
+      a Story row.
+- [x] Intro: "AI Daily 25" + formatted run_date + "Today's Top 25 AI
+      Stories", narrated. Outro: "That's all for today's AI Daily 25. See
+      you tomorrow.", narrated. Confirmed with the user (simple +
+      informative wording, narrated over silent).
+- [x] Intro/outro are regenerated on every `/produce` call (not cached like
+      story content) -- deliberately simple, since each clip only costs a
+      few seconds and there's no new DB state to track staleness.
+- [x] Verified end-to-end on episode 5: combined video duration grew from
+      365.5s to 378.7s (+13.2s for both clips, reasonable), both card
+      images visually confirmed clean and readable, video still valid
+      (h264/aac via `ffprobe`).
+- [ ] Still no transitions between segments (hard cut only) and no
+      background music (deliberately out of scope -- licensing complexity
+      for royalty-free audio, not attempted).
+
 ## Known issues / follow-ups
 
 - [ ] Caption timing in `compose_video_task` is a naive proportional estimate

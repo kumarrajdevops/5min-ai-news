@@ -86,3 +86,43 @@ def generate_card(headline: str, source_name: str, output_path: Path) -> None:
     )
 
     image.save(output_path, "PNG")
+
+
+def generate_branding_card(main_text: str, sub_text: str, output_path: Path) -> None:
+    """
+    Render an episode-level intro/outro card: wordmark, main line,
+    subtitle line. Same visual style as generate_card(), but without
+    the "Source: " framing -- there's no story here, just episode
+    branding.
+    """
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    image = Image.new("RGB", (CARD_WIDTH, CARD_HEIGHT), BACKGROUND_COLOR)
+    draw = ImageDraw.Draw(image)
+
+    draw.rectangle([(0, 0), (CARD_WIDTH, 10)], fill=ACCENT_COLOR)
+    brand_font = ImageFont.truetype(FONT_BOLD, 32)
+    draw.text((TITLE_MARGIN_X, 50), "AI NEWS", font=brand_font, fill=ACCENT_COLOR)
+
+    main_font = ImageFont.truetype(FONT_BOLD, 56)
+    max_text_width = CARD_WIDTH - (TITLE_MARGIN_X * 2)
+    lines = _wrap_text(draw, main_text, main_font, max_text_width)
+
+    total_height = TITLE_LINE_HEIGHT * len(lines)
+    # Shift up from dead-center to leave room for the subtitle below.
+    start_y = (CARD_HEIGHT - total_height) // 2 - 40
+
+    for i, line in enumerate(lines):
+        draw.text(
+            (TITLE_MARGIN_X, start_y + i * TITLE_LINE_HEIGHT),
+            line,
+            font=main_font,
+            fill=TEXT_COLOR,
+        )
+
+    sub_font = ImageFont.truetype(FONT_REGULAR, 32)
+    sub_y = start_y + len(lines) * TITLE_LINE_HEIGHT + 20
+    draw.text((TITLE_MARGIN_X, sub_y), sub_text, font=sub_font, fill=SOURCE_COLOR)
+
+    image.save(output_path, "PNG")

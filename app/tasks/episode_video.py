@@ -7,12 +7,49 @@ from app.content.video_composer import (
     concat_videos,
     get_audio_duration_seconds,
 )
-from app.content.visual_generator import generate_card
+from app.content.visual_generator import generate_branding_card, generate_card
 from app.content.voice_generator import synthesize_voice
 from app.db import SessionLocal
 from app.models import Episode, EpisodeStory, Story, StoryContent
 from app.tasks.content import MEDIA_ROOT, get_or_create_content, mark_content_failed
 from app.worker.celery_app import celery_app
+
+
+def _produce_branding_clip(main_text: str, sub_text: str, narration_text: str, clip_id: str) -> Path | None:
+    """
+    Render a short intro/outro clip: branding card + narration +
+    burned-in captions, via the same pure functions used for a
+    story's visual/voice/video stages. Not tied to a Story row --
+    clip_id is a plain string (e.g. "episode_5_intro") used to name
+    the generated files. Returns None (rather than raising) on
+    failure, so a branding-clip problem doesn't block the episode's
+    actual story content.
+    """
+
+    try:
+        image_path = MEDIA_ROOT / "images" / f"{clip_id}.png"
+        generate_branding_card(main_text, sub_text, image_path)
+
+        audio_path = MEDIA_ROOT / "audio" / f"{clip_id}.mp3"
+        synthesize_voice(narration_text, audio_path)
+        duration = get_audio_duration_seconds(audio_path)
+
+        captions_path = MEDIA_ROOT / "captions" / f"{clip_id}.srt"
+        build_captions(narration_text, duration, captions_path)
+
+        video_path = MEDIA_ROOT / "videos" / f"{clip_id}.mp4"
+        compose_video(
+            image_path=image_path,
+            audio_path=audio_path,
+            captions_path=captions_path,
+            output_path=video_path,
+        )
+
+        return video_path
+
+    except Exception as exc:
+        print(f"[episode_video] Branding clip {clip_id!r} failed: {exc}")
+        return None
 
 
 def _produce_story_content(db, story: Story, content: StoryContent) -> bool:
@@ -133,6 +170,17 @@ def produce_episode_video(episode_id: int) -> dict:
         failed = 0
         video_paths: list[Path] = []
 
+        formatted_date = episode.run_date.strftime("%B %d, %Y")
+
+        intro_path = _produce_branding_clip(
+            main_text="AI Daily 25",
+            sub_text=f"{formatted_date} — Today's Top 25 AI Stories",
+            narration_text=f"AI Daily 25 for {formatted_date}. Today's top 25 AI stories.",
+            clip_id=f"episode_{episode_id}_intro",
+        )
+        if intro_path:
+            video_paths.append(intro_path)
+
         for episode_story, story in rows:
             content = get_or_create_content(db, story.id)
 
@@ -150,7 +198,18 @@ def produce_episode_video(episode_id: int) -> dict:
                 failed += 1
                 print(f"[episode_video] Story {story.id} failed, excluded from episode {episode_id}")
 
-        if not video_paths:
+        outro_path = _produce_branding_clip(
+            main_text="That's all for today's AI Daily 25.",
+            sub_text="See you tomorrow.",
+            narration_text="That's all for today's AI Daily 25. See you tomorrow.",
+            clip_id=f"episode_{episode_id}_outro",
+        )
+        if outro_path:
+            video_paths.append(outro_path)
+
+        if succeeded + skipped_existing == 0:
+            # Intro/outro clips may still be in video_paths even if
+            # every story failed -- that's not a usable episode video.
             episode.video_status = "failed"
             db.commit()
             return {
