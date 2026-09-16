@@ -1,6 +1,7 @@
 from datetime import datetime, timezone  # Date/time handling
 
 from dateutil import parser as date_parser  # Robust ISO 8601 date parsing
+from sqlalchemy.exc import IntegrityError  # Raised on a uq_stories_url collision
 
 from app.config import settings  # Application configuration
 from app.db import SessionLocal  # PostgreSQL database session
@@ -143,10 +144,22 @@ def ingest_hackernews_stories() -> dict:
                 filter_reason=filter_reason,
             )
 
+            # Commit each story individually, not the whole run at
+            # once -- a uq_stories_url collision (a real possibility
+            # now that this task and app.tasks.ingestion.ingest_news
+            # fire at the same Celery Beat scheduled times, both
+            # capable of inserting the same URL) would otherwise crash
+            # this bare commit and lose every story queued so far in
+            # this run, not just the colliding one.
             db.add(story)
-            inserted += 1
 
-        db.commit()
+            try:
+                db.commit()
+                inserted += 1
+            except IntegrityError:
+                db.rollback()
+                duplicates += 1
+                print(f"[{SOURCE_NAME}] Skipped (inserted concurrently by another run): {url}")
 
     result = {
         "seen": seen,

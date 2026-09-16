@@ -15,7 +15,7 @@ CREDIBILITY_WEIGHTS: dict[str, float] = {
     "OpenAI": 0.95,
     "Google AI": 0.95,
     "NVIDIA Blog": 0.90,
-    "Microsoft AI Blog": 0.90,
+    "Microsoft Research Blog": 0.90,
     "MIT Technology Review AI": 0.90,
     "Hugging Face Blog": 0.85,
     "The Verge AI": 0.85,

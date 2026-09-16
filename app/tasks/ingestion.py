@@ -2,11 +2,13 @@ from datetime import datetime, timedelta, timezone  # Date/time handling
 
 import feedparser  # Read and parse RSS feeds
 from dateutil import parser as date_parser  # Robust date parsing (RFC 2822 + ISO 8601 + more)
+from sqlalchemy.exc import IntegrityError  # Raised on a uq_stories_url collision
 
 from app.config import settings  # Application configuration
 from app.db import SessionLocal  # PostgreSQL database session
 from app.filters.ai_relevance import calculate_ai_relevance  # AI relevance filter
 from app.models import Story  # Story database model
+from app.sources.article_fetcher import fetch_article_summary  # Fallback summary for empty RSS excerpts
 from app.sources.registry import NEWS_SOURCES  # Configured news sources
 from app.tasks.dedup import deduplicate_new_stories  # Duplicate-story grouping
 from app.worker.celery_app import celery_app  # Celery application
@@ -245,6 +247,16 @@ def ingest_news() -> dict:
                         None,
                     )
 
+                    # A minority of RSS entries carry no description at
+                    # all (confirmed: NVIDIA Blog's "Heart of the
+                    # Matter" story). Same gap and same fix already
+                    # used for Hacker News link-posts, whose API never
+                    # provides article content in the first place --
+                    # fetch the linked page's own description rather
+                    # than leaving the story with nothing.
+                    if not summary:
+                        summary = fetch_article_summary(url)
+
                     external_id = getattr(
                         entry,
                         "id",
@@ -288,18 +300,32 @@ def ingest_news() -> dict:
                         filter_reason=filter_reason,
                     )
 
-                    # Add the new story to the current database transaction
+                    # Commit each story individually (not the whole
+                    # source's batch at once) so a uq_stories_url
+                    # collision only drops this one row. Two concurrent
+                    # ingestion runs (or, since the Daily News Cycle's
+                    # Celery Beat schedule, the RSS and Hacker News
+                    # tasks firing at the same scheduled time) can both
+                    # pass the `existing_story` check above for the
+                    # same URL before either commits -- a real,
+                    # previously-documented race, not just theoretical.
+                    # A single shared commit-at-the-end would let that
+                    # collision roll back every other valid insert
+                    # already queued for this source in the same batch.
                     db.add(story)
 
-                    # Count the article as inserted
-                    articles_inserted += 1
-                    source_inserted += 1
-
-                # -------------------------------------------------
-                # Commit all stories from this source
-                # -------------------------------------------------
-
-                db.commit()
+                    try:
+                        db.commit()
+                        articles_inserted += 1
+                        source_inserted += 1
+                    except IntegrityError:
+                        db.rollback()
+                        duplicates += 1
+                        source_duplicates += 1
+                        print(
+                            f"[{source['name']}] Skipped (inserted concurrently "
+                            f"by another run): {url}"
+                        )
 
                 per_source_stats[source["name"]] = {
                     "seen": source_seen,

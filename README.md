@@ -14,10 +14,12 @@ generation → Automated QA → human review (Editorial Dashboard) →
 - FastAPI API
 - PostgreSQL (schema managed by Alembic -- see "First-time setup" below)
 - Redis + Celery worker
-- Multi-source RSS ingestion (10 sources incl. OpenAI, Google AI,
+- Multi-source RSS ingestion (11 enabled sources incl. OpenAI, Google AI,
   Google DeepMind, TechCrunch, The Verge, MIT Technology Review,
-  NVIDIA, Hugging Face, Ars Technica, Wired) with a deterministic
-  AI-relevance filter
+  Microsoft Research Blog, NVIDIA, Hugging Face, Ars Technica, Wired)
+  with a deterministic AI-relevance filter. A story with no summary of
+  its own falls back to fetching the linked article's own description
+  (`app/sources/article_fetcher.py`) rather than shipping empty.
 - Hacker News ingestion (official Algolia search API) -- resolves the
   real publisher for link-posts (e.g. "The Guardian") instead of
   attributing everything to "Hacker News", so credibility scoring

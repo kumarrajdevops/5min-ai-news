@@ -193,7 +193,11 @@ async function renderEpisodeStudio(episodeId) {
 function qaIsStale(ep) {
   if (!ep.video_produced_at) return false;
   if (!ep.qa_run_at) return true;
-  return new Date(ep.video_produced_at) > new Date(ep.qa_run_at);
+  if (new Date(ep.video_produced_at) > new Date(ep.qa_run_at)) return true;
+  // A reorder, swap, or a contained story's script edit also
+  // invalidates QA -- not just a re-Produce.
+  if (ep.content_changed_at && new Date(ep.content_changed_at) > new Date(ep.qa_run_at)) return true;
+  return false;
 }
 
 // Video files are regenerated in place at a fixed per-episode/per-story

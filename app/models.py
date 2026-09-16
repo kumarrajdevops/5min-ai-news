@@ -150,6 +150,17 @@ class Episode(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Set whenever a reorder, swap, or a contained story's script edit
+    # changes what this episode actually contains -- separate from
+    # video_produced_at (Produce didn't necessarily run again yet).
+    # Compared against qa_run_at the same way video_produced_at is, so
+    # the dashboard flags QA as stale after these actions too, not just
+    # after a re-Produce. See app/main.py's reorder/swap/
+    # update_story_content endpoints.
+    content_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
 
 class EpisodeStory(Base):
     """

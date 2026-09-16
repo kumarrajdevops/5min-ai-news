@@ -793,18 +793,77 @@ deleting history, so it stays a running log.
       or `app/tasks/scheduled.py` -- purely gating whether the process
       that reads it runs by default.
 
+### This session — 2026-09-17, part 23 (closed 5 small known-issue gaps in one pass)
+
+- [x] **QA staleness on reorder/swap/edit**: new `Episode.content_changed_at`
+      (migration `d8f4b2a71c93`), stamped by `reorder_episode_stories`,
+      `swap_episode_stories`, and `update_story_content` (the last one
+      stamps *every* episode referencing the edited story, since a story
+      can belong to more than one). `qaIsStale()` (`app.js`) now also
+      flags stale when `content_changed_at > qa_run_at`, not just
+      `video_produced_at`. Verified all three actions end-to-end on
+      episode 6 via curl: each one flipped `stale` from false to true,
+      confirmed by direct timestamp comparison.
+- [x] **Story #28's missing summary**: reused `article_fetcher.py`
+      (built for HN link-posts) rather than writing anything new --
+      wired the same `fetch_article_summary()` fallback into
+      `app/tasks/ingestion.py` for any RSS entry with no summary of its
+      own. Backfilled story #28 directly (confirmed via live DB query
+      it was the only RSS story affected): fetched a real summary from
+      NVIDIA's actual article page, regenerated its script, and
+      produced its video end-to-end -- verified `video_ready`, no
+      error, real audio/visual/video files.
+- [x] **Non-root worker/api containers**: added `appuser` (uid 1000) in
+      the `Dockerfile`. Found a real problem during verification, not
+      just theoretical: `media/` is bind-mounted in local dev, and
+      files created by earlier root-run containers were owned by
+      `root:root` mode `755` -- a build-time `chown` alone doesn't fix
+      a bind mount that overlays it, so a real produce call failed with
+      `PermissionError` the first time this was tested. Fixed with the
+      standard pattern for this: `entrypoint.sh` (installs `gosu`)
+      starts as root, `chown -R appuser:appuser /app/media` every
+      container start (idempotent, cheap, self-healing regardless of
+      how `media/`'s ownership got into a bad state), then `exec gosu
+      appuser "$@"` to drop to non-root before the actual long-running
+      process. Verified via `docker top`: every uvicorn/celery process
+      (including all worker fork-pool children) runs as uid 1000, and
+      a real produce call succeeds with files owned by `appuser`.
+- [x] **Two disabled RSS sources**: re-confirmed both live rather than
+      trusting the 2026-09-10 note. VentureBeat AI: still HTTP 429
+      (Vercel bot challenge) -- left disabled; a real fix needs a
+      headless browser to clear a JS challenge, out of scope for this
+      project's minimal-dependency approach, and not something to build
+      bot-detection evasion for. Microsoft AI Blog: still HTTP 410 on
+      the old URL, but found a real, currently-active official
+      replacement -- **Microsoft Research Blog**
+      (`https://www.microsoft.com/en-us/research/blog/feed/`, verified
+      200/valid RSS/recent posts) -- enabled it, updated the matching
+      `CREDIBILITY_WEIGHTS` key in `app/ranking/engine.py` (found by
+      checking, not assumed -- renaming a source name without updating
+      this would have silently dropped it to the 0.60 default weight).
+      Verified via a real ingestion run: `sources_processed: 11`,
+      Microsoft Research Blog fetched successfully (10 entries seen, 0
+      errors -- all happened to be outside the current time window,
+      not a bug).
+- [x] **Concurrent-ingestion race condition**: `app/tasks/ingestion.py`
+      and `app/tasks/ingestion_hackernews.py` both used to check
+      `existing_story` per-entry but commit once at the end of a whole
+      source/run -- a `uq_stories_url` collision (a real possibility
+      now that RSS and HN ingestion fire at the *same* Celery Beat
+      scheduled times, not just theoretical) would roll back every
+      other valid insert in that batch via the broad `except
+      Exception`, not just the colliding row (the HN file didn't even
+      have a try/except around its single end-of-run commit -- a
+      collision there would have crashed the whole task). Fixed by
+      committing each story individually with a narrow
+      `try/except IntegrityError`. Verified both tasks still ingest
+      normally after the change (real runs, sane insert/duplicate
+      counts, zero unexpected errors).
+
+Per current standing instruction, none of this session's changes were
+committed -- left staged/unstaged for the user to review.
+
 ## Known issues / follow-ups
-
-- [ ] Reorder/swap/script-edit still don't mark `qa_status`/the new
-      staleness fields as stale -- only a completed Produce does (see part
-      11 above). Broadening this to reorder/swap/edit wasn't asked for yet;
-      revisit if it turns out to matter in practice.
-
-- [ ] Observed during dashboard click-testing: 1 of 25 stories in episode 5
-      (story #28, NVIDIA Blog) has script text "No summary was available
-      from the source." -- confirmed isolated (only 1 row across all of
-      `story_content` matches this), not investigated further since it's a
-      single-source RSS gap, not a UI or pipeline bug.
 
 - [ ] Caption timing in `compose_video_task` is a naive proportional estimate
       (sentence character-count share of total audio duration), not real
@@ -818,20 +877,15 @@ deleting history, so it stays a running log.
 - [x] ~~Script/voice/visual/video pipeline is scoped to one story at a time~~
       -- resolved, see "part 7 (full-episode video production)" above.
 
-- [ ] `worker` container runs Celery as root (harmless locally, but the image has
-      no non-root user — should fix before any production deployment)
+- [x] ~~`worker` container runs Celery as root~~ -- fixed, see "part 23" above.
 - [ ] No automated tests exist yet for ingestion/dedup/ranking logic — all
       verification so far has been manual end-to-end runs against live RSS feeds
-- [ ] Two RSS sources are disabled and need real fixes, not just a flag:
-      VentureBeat AI (Vercel bot challenge, HTTP 429) and Microsoft AI Blog
-      (HTTP 410 Gone, needs a replacement feed URL) — see `app/sources/registry.py`
-- [ ] Potential race condition (untested, low likelihood at current scale):
-      two concurrent ingestion runs could both pass the per-URL existence
-      check before either commits, then collide on the `uq_stories_url`
-      constraint — the broad per-source `except Exception` would roll back
-      and lose that entire source's batch, not just the colliding row. Only
-      matters if ingestion is ever triggered concurrently (not the case with
-      a single daily scheduler). See `errors.md` §5.
+- [x] ~~Two RSS sources are disabled and need real fixes~~ -- Microsoft
+      fixed (real replacement feed), VentureBeat re-confirmed still
+      blocked and deliberately left disabled -- see "part 23" above.
+- [x] ~~Potential race condition on concurrent ingestion~~ -- fixed, see
+      "part 23" above. Was no longer just theoretical once RSS and HN
+      ingestion started firing at the same Celery Beat scheduled times.
 
 ## Next up (near-term, per architecture but not yet built)
 

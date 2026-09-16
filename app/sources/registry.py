@@ -21,11 +21,12 @@ NEWS_SOURCES = [
         "name": "VentureBeat AI",
         "url": "https://venturebeat.com/category/ai/feed/",
         "source_type": "rss",
-        # Confirmed 2026-09-10: still returns HTTP 429 (Vercel bot
-        # challenge) even with a browser-like User-Agent set, and the
-        # response body isn't valid XML (bozo=1, "invalid token") -- it's
-        # the challenge page, not the feed. Disabled until/unless we
-        # want to invest in a real headless-browser fetch for this one.
+        # Re-confirmed 2026-09-17 (still HTTP 429, Vercel bot challenge,
+        # same as 2026-09-10): a real fix needs a headless browser to
+        # clear a JS challenge, which is out of scope for this
+        # project's local-first/minimal-dependency approach -- and not
+        # something to build bot-detection evasion for. Disabled until
+        # VentureBeat offers a real, non-challenged feed or API.
         "enabled": False,
     },
     {
@@ -41,12 +42,17 @@ NEWS_SOURCES = [
         "enabled": True,
     },
     {
-        "name": "Microsoft AI Blog",
-        "url": "https://blogs.microsoft.com/ai/feed/",
+        "name": "Microsoft Research Blog",
+        "url": "https://www.microsoft.com/en-us/research/blog/feed/",
         "source_type": "rss",
-        # Confirmed 2026-09-10: HTTP 410 Gone. The feed was retired, not
-        # just moved. Disabled -- needs a real replacement URL, not a fix.
-        "enabled": False,
+        # The old "Microsoft AI Blog" feed (blogs.microsoft.com/ai/feed/)
+        # returns HTTP 410 Gone -- retired, not moved (re-confirmed
+        # 2026-09-17). This is a real, currently-active, official
+        # replacement (verified HTTP 200, well-formed RSS, recent
+        # posts). Broader than AI-only, same as Hacker News already is
+        # -- the deterministic AI-relevance filter narrows it down,
+        # same pattern as every other source here.
+        "enabled": True,
     },
     {
         "name": "NVIDIA Blog",

@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -249,6 +249,11 @@ def reorder_episode_stories(episode_id: int, body: ReorderRequest):
     uq_episode_rank_position unique constraint mid-update.
     """
     with SessionLocal() as db:
+        episode = db.get(Episode, episode_id)
+
+        if episode is None:
+            raise HTTPException(status_code=404, detail="Episode not found.")
+
         rows = (
             db.query(EpisodeStory)
             .filter(
@@ -279,6 +284,11 @@ def reorder_episode_stories(episode_id: int, body: ReorderRequest):
         for position, story_id in zip(existing_positions, body.story_ids):
             rows_by_story_id[story_id].rank_position = position
 
+        # A reorder changes what this episode's video will actually
+        # look like -- flag any existing QA result as stale (see
+        # qaIsStale() in app/dashboard/app.js).
+        episode.content_changed_at = datetime.now(timezone.utc)
+
         db.commit()
 
     return {"episode_id": episode_id, "status": "reordered", "count": len(rows)}
@@ -293,6 +303,11 @@ def swap_episode_stories(episode_id: int, body: SwapRequest):
     between the two rows.
     """
     with SessionLocal() as db:
+        episode = db.get(Episode, episode_id)
+
+        if episode is None:
+            raise HTTPException(status_code=404, detail="Episode not found.")
+
         primary_row = (
             db.query(EpisodeStory)
             .filter(
@@ -339,6 +354,10 @@ def swap_episode_stories(episode_id: int, body: SwapRequest):
 
         primary_row.rank_position = old_backup_rank
         primary_row.selection_status = "backup"
+
+        # A swap changes which story is actually in the episode --
+        # flag any existing QA result as stale.
+        episode.content_changed_at = datetime.now(timezone.utc)
 
         db.commit()
 
@@ -549,6 +568,7 @@ def _serialize_episode(db, episode: Episode) -> dict:
         "video_status": episode.video_status,
         "video_url": f"/{episode.video_path}" if episode.video_path else None,
         "video_produced_at": episode.video_produced_at,
+        "content_changed_at": episode.content_changed_at,
         "intro_duration_seconds": intro_duration_seconds,
         "qa_status": episode.qa_status,
         "qa_report": json.loads(episode.qa_report) if episode.qa_report else None,
@@ -677,6 +697,12 @@ def update_story_content(story_id: int, body: StoryContentUpdate):
     `if content.status == "video_ready"` skip-check
     (app/tasks/episode_video.py), leaving the edited script's audio/
     video permanently out of sync with the text actually shown.
+
+    Also flags any episode containing this story as QA-stale -- a
+    story can appear in more than one episode (EpisodeStory is a
+    many-to-many join), so every episode referencing it gets stamped,
+    not just "the current one" (there isn't one at this endpoint's
+    level -- it only knows the story_id).
     """
     with SessionLocal() as db:
         content = (
@@ -705,6 +731,18 @@ def update_story_content(story_id: int, body: StoryContentUpdate):
         content.captions_path = None
         content.video_path = None
         content.error_message = None
+
+        now = datetime.now(timezone.utc)
+        affected_episode_ids = (
+            db.query(EpisodeStory.episode_id)
+            .filter(EpisodeStory.story_id == story_id)
+            .distinct()
+            .all()
+        )
+        for (episode_id,) in affected_episode_ids:
+            episode = db.get(Episode, episode_id)
+            if episode is not None:
+                episode.content_changed_at = now
 
         db.commit()
 
