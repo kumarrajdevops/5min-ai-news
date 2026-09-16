@@ -1,6 +1,7 @@
 from app.db import SessionLocal
 from app.filters.dedup import find_duplicate_match
 from app.models import Story
+from app.tasks.verification import run_fact_extraction_and_verification
 from app.worker.celery_app import celery_app
 
 
@@ -86,5 +87,12 @@ def deduplicate_new_stories() -> dict:
     }
 
     print(f"[dedup] Completed: {result}")
+
+    # Fact Extraction + Verification run on every ingestion cycle, same
+    # as dedup itself -- this is the one place both ingest_news and
+    # ingest_hackernews_stories already funnel through.
+    verification_task = run_fact_extraction_and_verification.delay()
+    print(f"[dedup] Queued verification task {verification_task.id}")
+    result["verification_task_id"] = verification_task.id
 
     return result

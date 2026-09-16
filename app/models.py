@@ -78,6 +78,35 @@ class Story(Base):
         nullable=True,
     )
 
+    # -----------------------------------------------------------
+    # Fact Extraction + Verification Engine (see app/extraction/
+    # fact_extractor.py, app/verification/engine.py, app/tasks/
+    # verification.py). Soft signal only -- never gates ranking
+    # eligibility, see verify_story()'s docstring for why.
+    # -----------------------------------------------------------
+
+    # JSON-serialized dict from extract_facts() (companies, products,
+    # events, dates, claims) -- plain-text audit trail, same pattern as
+    # filter_reason/dedup_reason/rank_reason.
+    extracted_facts: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # pending -> verified/unverified. "pending" (never processed by
+    # run_fact_extraction_and_verification yet) is treated as "no
+    # bonus, not flagged either way" wherever this is consumed.
+    verification_status: Mapped[str] = mapped_column(
+        String(50),
+        default="pending",
+        nullable=False,
+    )
+
+    verification_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     __table_args__ = (
         UniqueConstraint("url", name="uq_stories_url"),
     )

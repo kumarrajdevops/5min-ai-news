@@ -21,7 +21,9 @@ explainable, nothing that can hallucinate or vary run to run:
 | Ingestion (RSS, Hacker News) | `feedparser`/`requests`, plain HTTP | No |
 | AI-relevance filter | Regex keyword matching against a fixed word list | No |
 | Deduplication | Title string-similarity + time window | No |
-| Ranking | A fixed scoring formula (recency, source credibility, momentum) | No |
+| Fact extraction | Keyword/regex matching (companies, products, events, dates, numeric claims) | No |
+| Verification (soft signal) | Cross-source count + source credibility threshold | No |
+| Ranking | A fixed scoring formula (recency, source credibility, momentum, verification) | No |
 | Script generation | String templates from the raw RSS/article text | No |
 | Voice synthesis | Microsoft's `edge-tts` neural voice (`en-US-GuyNeural`) | **Yes -- the one exception** |
 | Visual card | Pillow drawing text on a static template | No |
@@ -55,9 +57,20 @@ whether an article is about AI), never a call to an AI API.
   attributing everything to "Hacker News", so credibility scoring
   reflects the actual outlet
 - Deterministic duplicate-story detection (title similarity + time window)
+- Fact Extraction (companies, products, event categories, dates,
+  numeric claims -- `app/extraction/fact_extractor.py`) and a
+  Verification Engine (`app/verification/engine.py`: verified if
+  corroborated by another outlet, or from a source credible enough to
+  be its own primary source) between dedup and ranking. **Soft signal
+  only** -- nothing is excluded from ranking; verification status is
+  shown in the dashboard and gives ranking a small score nudge (same
+  "surface prominently, human decides" philosophy as Automated QA).
 - Multi-factor ranking engine (recency, source credibility, AI
-  relevance, cross-source momentum) + Top-25/5-backup selection,
-  persisted per run as an "Episode"
+  relevance, cross-source momentum, verification) + Top-25/5-backup
+  selection, persisted per run as an "Episode". A story that's already
+  been a **primary** (narrated) selection in any earlier episode is
+  never selected again, in any future episode -- an unused backup
+  (never promoted, never narrated) remains eligible.
 - Script/voice/visual/video content generation, free/local (no API
   keys) -- runs per-story or across a full episode, produces one
   combined branded video with intro/outro
@@ -146,10 +159,19 @@ curl -X POST http://localhost:8000/api/v1/ingestion/hackernews
 ```
 
 **3. (Optional) Re-run deduplication manually**, without a full
-ingestion cycle:
+ingestion cycle (auto-chains into Fact Extraction + Verification, same
+as after a real ingestion run):
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/dedup/run
+```
+
+**3b. (Optional) Re-run Fact Extraction + Verification manually**,
+without a full dedup pass -- e.g. after backfilling data. Soft signal
+only, safe to re-run (only processes stories still at `verification_status: "pending"`):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/verification/run
 ```
 
 **4. Rank + select the Top 25 + 5 backups.** This is intentionally
@@ -224,9 +246,10 @@ curl -X POST http://localhost:8000/api/v1/episodes/{episode_id}/qa
 
 Poll `GET /api/v1/episodes/{episode_id}` for `qa_status`
 (`pending` -> `passed`/`failed`), `qa_report` (per-check pass/fail
-detail), and `qa_run_at`. `source_verification` always reports as not
-implemented -- there's no Verification Engine yet -- rather than
-faking a pass.
+detail), and `qa_run_at`. `source_verification` still always reports
+as not implemented -- the Verification Engine now exists (see below),
+but this specific QA check hasn't been wired up to consume its data
+yet -- rather than faking a pass.
 
 A QA result is stale once the episode is reproduced afterward
 (`video_produced_at > qa_run_at`) -- the dashboard surfaces this as a
@@ -288,16 +311,20 @@ dropped mid-session, not through automated verification alone.
 - **Edit a script** -- click a story's title to open headline/summary/
   script text as editable fields, alongside the source article link
   (opens in a new tab, plus a one-click Copy button) and its metadata
-  (source, author, published/collected timestamps, and -- when the
-  story was surfaced via an aggregator like Hacker News rather than
-  ingested directly -- a "Discovered via" link back to that discussion
-  thread). Saving invalidates that story's audio/visual/video so the
-  next Produce regenerates them **from the edited script** (Produce
-  no longer silently regenerates and overwrites a saved edit -- see
-  `TODO.md`).
+  (source, author, published/collected timestamps, verification
+  status/reason, extracted facts, and -- when the story was surfaced
+  via an aggregator like Hacker News rather than ingested directly --
+  a "Discovered via" link back to that discussion thread). Saving
+  invalidates that story's audio/visual/video so the next Produce
+  regenerates them **from the edited script** (Produce no longer
+  silently regenerates and overwrites a saved edit -- see `TODO.md`).
 - **Proofread against the source** -- every story in the Top 30 list
   also shows its source article link (new tab + Copy button) directly
   below the title, not just in the edit panel.
+- **See verification status at a glance** -- a second pill next to each
+  story's content status (verified = green, unverified = amber) with
+  the reason as a tooltip. Soft signal only -- nothing is hidden or
+  excluded, it's there so the editor can make an informed call.
 - **Produce / Run QA** -- both buttons disable and show a live
   elapsed-time progress indicator while running, then auto-refresh
   the view when done (Produce polls `video_status`, QA polls
@@ -368,15 +395,16 @@ docker exec 5min-ai-news-api-1 pip install -r requirements-dev.txt
 docker exec -w /app 5min-ai-news-api-1 pytest
 ```
 
-55 tests, no running Postgres required -- DB-backed tests use an
+80 tests, no running Postgres required -- DB-backed tests use an
 in-memory SQLite database (`tests/conftest.py`'s `db_session` fixture;
 every model uses portable column types, so this is a faithful stand-in)
 rather than the real dev database. Covers the deterministic filters
-(AI-relevance, dedup, ranking, script generation -- including the
-promo-sentence/truncation-marker fixes from this session) plus direct
-regression tests for the three hardest-won bugs found this session:
-the AV-duration desync (real ffmpeg, not mocked), the script-clobbering
-bug, and the ingestion race condition. Each regression test was
+(AI-relevance, dedup, ranking, script generation, fact extraction,
+verification -- including the promo-sentence/truncation-marker fixes
+from an earlier session) plus direct regression tests for the three
+hardest-won bugs found in that session: the AV-duration desync (real
+ffmpeg, not mocked), the script-clobbering bug, and the ingestion race
+condition. Each regression test was
 verified to actually fail when its bug is reintroduced, not just pass
 tautologically.
 

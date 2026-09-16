@@ -56,6 +56,14 @@ SCORE_WEIGHTS = {
     "momentum": 0.15,
 }
 
+# A flat nudge, not a 5th weighted pillar -- deliberately not folded
+# into SCORE_WEIGHTS above (which already sum to 1.0 and were tuned
+# against real headline pairs, see this file's own comments) so the
+# Verification Engine's soft signal (see app/verification/engine.py)
+# can't destabilize that existing balance. Applied once per story when
+# verification_status == "verified"; "pending"/"unverified" get none.
+VERIFICATION_BONUS = 0.05
+
 
 def compute_recency_score(
     published_at: datetime,
@@ -105,12 +113,20 @@ def compute_total_score(
     duplicate_count: int,
     now: datetime,
     window_hours: float,
+    verification_status: str = "pending",
 ) -> tuple[float, str]:
     """
     Compute the final weighted ranking score for a single story.
     Returns (total_score, human_readable_reason) so the reason can
     be stored for audit/explainability (same pattern as the AI
     relevance filter and the dedup filter).
+
+    verification_status defaults to "pending" so this stays safe to
+    call before every story has been processed by
+    run_fact_extraction_and_verification -- only "verified" adds the
+    bonus; "pending"/"unverified" both score identically (no bonus,
+    not penalized either -- see app/verification/engine.py, this is a
+    soft signal, not a gate).
     """
 
     # A story with no publish date can't get a recency score; treat
@@ -130,11 +146,14 @@ def compute_total_score(
 
     momentum = compute_momentum_score(duplicate_count)
 
+    verification_bonus = VERIFICATION_BONUS if verification_status == "verified" else 0.0
+
     total = (
         SCORE_WEIGHTS["recency"] * recency
         + SCORE_WEIGHTS["credibility"] * credibility
         + SCORE_WEIGHTS["ai_relevance"] * ai_component
         + SCORE_WEIGHTS["momentum"] * momentum
+        + verification_bonus
     )
 
     reason = (
@@ -142,7 +161,8 @@ def compute_total_score(
         f"credibility={credibility:.2f}(w={SCORE_WEIGHTS['credibility']}), "
         f"ai_relevance={ai_component:.2f}(w={SCORE_WEIGHTS['ai_relevance']}), "
         f"momentum={momentum:.2f}(w={SCORE_WEIGHTS['momentum']}, "
-        f"duplicate_count={duplicate_count}) "
+        f"duplicate_count={duplicate_count}), "
+        f"verification={verification_status}(bonus={verification_bonus:.2f}) "
         f"=> total={total:.3f}"
     )
 

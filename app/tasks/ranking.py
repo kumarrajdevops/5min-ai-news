@@ -42,18 +42,43 @@ def run_ranking_selection(run_date_iso: str | None = None) -> dict:
     with SessionLocal() as db:
 
         # -------------------------------------------------
+        # Never re-select a story that's already been a primary
+        # (narrated) selection in ANY earlier episode, regardless of
+        # that episode's later approve/reject status -- "once an
+        # episode reads a story, it never appears again" (confirmed
+        # against real data: episodes #6/#7 shared 14 of 25 primary
+        # slots before this fix). A story that only ever sat as an
+        # unused backup (never promoted to primary, never narrated)
+        # remains eligible -- it was never actually presented to
+        # anyone. Queried fresh on every run (not a stored flag), so
+        # a backup promoted to primary later via the dashboard's swap
+        # is caught by the very next ranking run too.
+        # -------------------------------------------------
+
+        already_primary_story_ids = {
+            row[0] for row in
+            db.query(EpisodeStory.story_id)
+            .filter(EpisodeStory.selection_status == "primary")
+            .distinct()
+            .all()
+        }
+
+        # -------------------------------------------------
         # Eligible pool: canonical (non-duplicate), AI-candidate
         # stories. Not-AI and duplicate rows never reach ranking.
         # -------------------------------------------------
 
-        stories = (
-            db.query(Story)
-            .filter(
-                Story.ai_relevance == "ai_candidate",
-                Story.canonical_story_id.is_(None),
-            )
-            .all()
+        eligible_query = db.query(Story).filter(
+            Story.ai_relevance == "ai_candidate",
+            Story.canonical_story_id.is_(None),
         )
+
+        if already_primary_story_ids:
+            eligible_query = eligible_query.filter(
+                Story.id.notin_(already_primary_story_ids)
+            )
+
+        stories = eligible_query.all()
 
         # -------------------------------------------------
         # Duplicate counts per canonical story, computed in one
@@ -84,6 +109,7 @@ def run_ranking_selection(run_date_iso: str | None = None) -> dict:
                 duplicate_count=duplicate_count,
                 now=now,
                 window_hours=settings.news_window_hours,
+                verification_status=story.verification_status,
             )
 
             scored.append((story, score, reason))
@@ -125,6 +151,7 @@ def run_ranking_selection(run_date_iso: str | None = None) -> dict:
             "episode_id": episode.id,
             "run_date": run_date.isoformat(),
             "eligible_stories": len(scored),
+            "already_used_excluded": len(already_primary_story_ids),
             "primary_selected": min(len(top_slots), PRIMARY_SLOTS),
             "backup_selected": max(0, len(top_slots) - PRIMARY_SLOTS),
         }

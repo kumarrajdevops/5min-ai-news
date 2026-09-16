@@ -17,6 +17,7 @@ from app.tasks.episode_video import produce_episode_video
 from app.tasks.ingestion import ingest_news
 from app.tasks.ingestion_hackernews import ingest_hackernews_stories
 from app.tasks.ranking import run_ranking_selection
+from app.tasks.verification import run_fact_extraction_and_verification
 
 
 # Object-storage-style local media root (see app/tasks/content.py).
@@ -154,6 +155,19 @@ def trigger_dedup():
     dedup without doing a full ingestion cycle first.
     """
     task = deduplicate_new_stories.delay()
+    return {"task_id": task.id, "status": "queued"}
+
+
+@app.post("/api/v1/verification/run")
+def trigger_verification():
+    """
+    Manually trigger Fact Extraction + the Verification Engine.
+    Normally this runs automatically at the end of every dedup pass
+    (see app/tasks/dedup.py), but this endpoint is useful for testing,
+    backfilling, or re-running without a full ingestion cycle first.
+    Soft signal only -- see app/verification/engine.py's docstring.
+    """
+    task = run_fact_extraction_and_verification.delay()
     return {"task_id": task.id, "status": "queued"}
 
 
@@ -522,6 +536,9 @@ def _serialize_episode(db, episode: Episode) -> dict:
             "published_at": story.published_at,
             "collected_at": story.collected_at,
             "discovery": _discovery_info(story),
+            "verification_status": story.verification_status,
+            "verification_reason": story.verification_reason,
+            "extracted_facts": json.loads(story.extracted_facts) if story.extracted_facts else None,
             # Needed by the dashboard's "click a story, jump the
             # player" feature (sums preceding durations) and its edit
             # panel -- None until that story's content pipeline runs.

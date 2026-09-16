@@ -912,8 +912,140 @@ current standing instruction, never committed proactively).
       FastAPI endpoints (`app/main.py`) themselves. A reasonable next
       layer to add, not attempted in this pass.
 
+### This session — 2026-09-17, part 25 (Fact Extraction + Verification Engine)
+
+Built both of `project.md`'s remaining "News Engine" phases (per user
+request, one after the other, then tested end-to-end). **Soft signal
+only** (explicit user decision after discussing hard-gate vs.
+soft-signal tradeoffs) -- neither phase excludes a story from ranking;
+both add data + a small score nudge for editorial awareness, matching
+how Automated QA already works here (surfaced prominently, never
+auto-blocking).
+
+- [x] **Fact Extraction** (`app/extraction/fact_extractor.py`):
+      deterministic keyword/regex extraction of companies, products,
+      event categories (launch/funding/acquisition/lawsuit-regulatory/
+      research/partnership/personnel/safety-policy), explicit dates,
+      and numeric claims ($/%/multipliers) -- same no-LLM pattern as
+      `ai_relevance.py`. "Claims" specifically means the concrete,
+      checkable numeric assertions a deterministic pass can actually
+      pull out, not free-form claim understanding (that needs an LLM,
+      which this project doesn't use -- see `CLAUDE.md`).
+- [x] **Verification Engine** (`app/verification/engine.py`):
+      `verify_story()` -- verified if corroborated by >=1 other
+      independently-discovered outlet (reusing the same cross-source
+      signal as ranking's momentum score) OR from a source credible
+      enough to be its own primary source (>=0.85 credibility,
+      reusing `compute_credibility_score`) -- e.g. OpenAI's own blog
+      doesn't need a second outlet to "confirm" its own announcement.
+      Otherwise "unverified" -- a real, expected, non-excluding value.
+- [x] New `Story` columns (migration `e2a9c74f1b06`): `extracted_facts`
+      (JSON text), `verification_status` (pending/verified/unverified),
+      `verification_reason`. New task
+      `app/tasks/verification.run_fact_extraction_and_verification`,
+      chained automatically after dedup (the one place both
+      `ingest_news` and `ingest_hackernews_stories` already funnel
+      through) plus a manual `POST /api/v1/verification/run`.
+- [x] Ranking integration (`app/ranking/engine.py`): a flat
+      `VERIFICATION_BONUS = 0.05` added to `compute_total_score`'s
+      total when verified -- deliberately NOT folded into the existing
+      `SCORE_WEIGHTS` (already sum to 1.0, tuned against real headline
+      pairs) so it can't destabilize that balance. Documented (and
+      tested) that this means the total can exceed 1.0 by exactly the
+      bonus at the extreme, rather than falsely claiming it's still
+      hard-bounded.
+- [x] Dashboard/API visibility (since a soft signal needs to actually
+      be seen to matter): `_serialize_episode` exposes all 3 new
+      fields; the story list shows a second pill (verified=green,
+      unverified=amber, pending=neutral, reusing existing `.pill`
+      classes) with the reason as a tooltip; the edit panel's metadata
+      block shows verification status/reason and a readable summary of
+      extracted facts.
+- [x] 25 new pytest tests (`test_fact_extractor.py`,
+      `test_verification_engine.py`, extended `test_ranking_engine.py`)
+      -- 80 total now passing.
+- [x] **Found and fixed 2 real bugs via live-data testing, not just unit
+      tests**: (1) `EVENT_KEYWORDS["funding"]` only listed "raises",
+      missing "raised"/"raising" -- a real headline ("after raising
+      $300 million") silently failed to match until the tense variants
+      were added (extended several other categories the same way --
+      launch/acquisition/lawsuit/partnership/personnel all had similar
+      gaps). (2) bare "policy" in the safety_policy category
+      false-matched a completely unrelated eBPF access-control story
+      ("enforcing a policy (allow/deny)") -- replaced with more
+      specific phrases ("ai policy", "ai regulation", "regulatory").
+      Confirmed the fix directly: reset that story to pending, re-ran
+      verification, confirmed the false-positive category was gone and
+      the genuine "90%" numeric claim was still correctly extracted.
+- [x] **Verified end-to-end against the live stack, not just code
+      review**: ran the migration; restarted `worker` cleanly (task
+      registered); triggered `/api/v1/verification/run` on 63 real
+      eligible stories -- 30 verified/33 unverified, spot-checked
+      individual reason strings against real story content (both the
+      primary-source and single-source-unverified cases look
+      editorially correct); triggered a real HN ingestion and confirmed
+      the full auto-chain (ingest -> dedup -> verification) fired
+      correctly end-to-end on just the newly-inserted stories; ran
+      `/api/v1/episodes/select` (episode #7, 63 eligible, 25 primary +
+      5 backup) and confirmed real `rank_reason` strings show the
+      bonus applied only when verified, with verified stories
+      generally (not absolutely -- it's a nudge) outranking comparable
+      unverified ones; confirmed the new fields appear in
+      `GET /api/v1/episodes/{id}` and the dashboard's served
+      `app.js`/`style.css`.
+
+### This session — 2026-09-17, part 26 (never re-select an already-narrated story)
+
+- [x] **Real bug, user-reported, confirmed against live data before
+      fixing**: episodes #6 and #7 (both created earlier this session
+      from the same growing story pool) shared 14 of 25 primary slots
+      (19 of 30 total) -- nothing in `run_ranking_selection`
+      (`app/tasks/ranking.py`) excluded a story just because an earlier
+      episode already selected it. User's reasoning: the same news/
+      story would end up narrated in multiple daily episodes.
+- [x] Fixed by excluding any story that's ever had
+      `EpisodeStory.selection_status == "primary"` in **any** episode,
+      regardless of that episode's later approve/reject status ("in
+      any case", per the user) -- queried fresh on every ranking run
+      (not a stored flag), so a backup promoted to primary later via
+      the dashboard's swap is caught by the very next run too, with no
+      extra bookkeeping needed. Scoped to **primary only** (confirmed
+      with the user): a story that only ever sat as an unused backup,
+      never narrated, remains eligible for a future episode's primary
+      slot. New `already_used_excluded` count added to the task's
+      result dict for visibility, matching this codebase's habit of
+      surfacing real counts for every stage.
+- [x] **Verified end-to-end against the live stack**: triggered a new
+      selection (episode #8) against the same pool that produced the
+      14/25 overlap -- result: `already_used_excluded: 60`,
+      `eligible_stories: 6` (this project's small candidate pool is
+      now mostly "used up" after 3 selection runs today against
+      largely the same underlying stories -- an honest, expected
+      consequence of the fix, not a bug). Confirmed via direct SQL
+      **exact zero overlap** between episode #8's primary stories and
+      every prior episode's primary stories (not just "looks smaller").
+      Also confirmed the positive case on real data: story #74, which
+      sat as an unused **backup** in episode #6 (never narrated),
+      correctly remained eligible and was selected as **primary** in
+      episode #8 -- proving the primary-only scope, not just asserting
+      it. Full `pytest` suite (80 tests) still passes.
+- [ ] Not covered by an automated test (same documented gap as
+      `run_ranking_selection`'s other logic -- it opens its own
+      `SessionLocal()` internally rather than accepting `db` as a
+      parameter, see part 24's "not covered by this pass" note).
+      Verified live/manually instead, per above.
+
 ## Known issues / follow-ups
 
+- [ ] Automated QA's `source_verification` check (`app/qa/video_qa.py`)
+      still always reports `passed: None`/"not implemented" -- it
+      predates the Verification Engine (part 25) and hasn't been wired
+      up to actually read `Story.verification_status` for the episode's
+      stories yet. A real, low-effort follow-up now that the data
+      exists (e.g. report the verified/unverified breakdown as
+      informational, matching this check's existing non-gating
+      `passed: None` pattern) -- not done in part 25's pass since it
+      wasn't asked for, noted here rather than silently left stale.
 - [ ] Caption timing in `compose_video_task` is a naive proportional estimate
       (sentence character-count share of total audio duration), not real
       forced alignment against the TTS engine's actual word timings --
@@ -942,10 +1074,11 @@ current standing instruction, never committed proactively).
 
 ## Next up (near-term, per architecture but not yet built)
 
-- [ ] Fact Extraction phase (claims, dates, companies, products, events)
-- [ ] Verification Engine (cross-source confirmation before a story is
-      publishable) — currently the pipeline ranks AI-candidate stories directly,
-      with no separate verified/unverified gate
+- [x] ~~Fact Extraction phase~~ -- built, see "part 25" above.
+- [x] ~~Verification Engine~~ -- built as a soft signal (not a hard
+      gate, per explicit user decision), see "part 25" above. Every
+      AI-candidate story still reaches ranking regardless of
+      verification status.
 - [x] ~~Editorial Dashboard~~ -- built, see "part 10" onward above.
 - [x] ~~Scheduled collection cycle~~ -- built via Celery Beat, see
       "part 22" above. Human approval remains manual, per the

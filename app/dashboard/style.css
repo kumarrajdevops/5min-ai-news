@@ -138,11 +138,11 @@ table.episode-list tr.row-link:hover { background: var(--surface-2); }
   white-space: nowrap;
 }
 
-.pill.pass, .pill.passed, .pill.ready, .pill.approved, .pill.video_ready {
+.pill.pass, .pill.passed, .pill.ready, .pill.approved, .pill.video_ready, .pill.verified {
   background: var(--pass-bg); color: var(--pass);
 }
 .pill.fail, .pill.failed, .pill.rejected { background: var(--fail-bg); color: var(--fail); }
-.pill.skip, .pill.pending, .pill.draft, .pill.producing, .pill.script_ready, .pill.voice_ready, .pill.visual_ready {
+.pill.skip, .pill.pending, .pill.draft, .pill.producing, .pill.script_ready, .pill.voice_ready, .pill.visual_ready, .pill.unverified {
   background: var(--skip-bg); color: var(--skip);
 }
 
@@ -243,6 +243,13 @@ li.story-row {
   border-radius: 8px;
   cursor: grab;
   border: 1px solid transparent;
+}
+
+.story-pills {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
 li.story-row:hover { background: var(--surface-2); }

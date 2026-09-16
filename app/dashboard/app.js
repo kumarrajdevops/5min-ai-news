@@ -68,6 +68,40 @@ function renderEditMetaHtml(story) {
     `;
   }
 
+  // Soft signal only -- see app/verification/engine.py. Always shown
+  // (even "pending") so the editor knows whether this story has been
+  // through the Verification Engine pass yet at all.
+  html += `
+    <div class="edit-meta-row">
+      <dt>Verification</dt>
+      <dd><span class="pill ${story.verification_status}">${escapeHtml(story.verification_status)}</span></dd>
+    </div>
+  `;
+  if (story.verification_reason) {
+    html += `
+      <div class="edit-meta-row">
+        <dt>Verification reason</dt>
+        <dd>${escapeHtml(story.verification_reason)}</dd>
+      </div>
+    `;
+  }
+
+  const facts = story.extracted_facts;
+  if (facts && (facts.companies.length || facts.products.length || facts.events.length || facts.dates.length || facts.claims.length)) {
+    const parts = [];
+    if (facts.companies.length) parts.push(`Companies: ${facts.companies.join(", ")}`);
+    if (facts.products.length) parts.push(`Products: ${facts.products.join(", ")}`);
+    if (facts.events.length) parts.push(`Events: ${facts.events.join(", ")}`);
+    if (facts.dates.length) parts.push(`Dates: ${facts.dates.join(", ")}`);
+    if (facts.claims.length) parts.push(`Claims: ${facts.claims.join(", ")}`);
+    html += `
+      <div class="edit-meta-row">
+        <dt>Extracted facts</dt>
+        <dd>${escapeHtml(parts.join(" · "))}</dd>
+      </div>
+    `;
+  }
+
   return html;
 }
 
@@ -375,7 +409,10 @@ function renderStoryList(listId, stories, ep, jumpable) {
         <div class="story-source">${escapeHtml(s.source_name)}</div>
         ${renderSourceLinkHtml(s.url)}
       </div>
-      <span class="pill ${s.content_status || "pending"}">${s.content_status || "no content"}</span>
+      <div class="story-pills">
+        <span class="pill ${s.content_status || "pending"}">${s.content_status || "no content"}</span>
+        <span class="pill ${s.verification_status}" title="${escapeAttr(s.verification_reason || "")}">${s.verification_status}</span>
+      </div>
     </li>
   `).join("");
 
