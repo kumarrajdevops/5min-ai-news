@@ -164,13 +164,23 @@ All four stages are free/local, no API keys required:
 - **Script** -- deterministic, template-based: headline + a
   deterministic summary of the story, nothing more (no editorializing
   or speculative "why it matters" commentary). Same pattern as the
-  AI-relevance/dedup filters.
+  AI-relevance/dedup filters. For Hacker News link-posts (HN's API has
+  no article content, only submission metadata), the summary is
+  fetched from the linked article's own `og:description`/`meta
+  description`/first paragraph (`app/sources/article_fetcher.py`)
+  rather than falling back to "N points, M comments on Hacker News."
+  Promotional/newsletter-pitch sentences ("subscribe", "sign up",
+  etc.) are filtered out of any summary before narration.
 - **Voice** -- [edge-tts](https://github.com/rany2/edge-tts) (free
   Microsoft neural TTS, one branded voice for every story).
 - **Visual** -- a branded title card rendered with Pillow.
 - **Video** -- ffmpeg composes the image + audio + burned-in captions
-  into an mp4. Captions are timed with a naive proportional estimate
-  (not real forced alignment) -- see `TODO.md`.
+  into an mp4, hard-capped to the real audio duration (`-t
+  <duration>`, not just `-shortest` -- see `TODO.md` for why that
+  matters). A silent 0.5s clip is inserted between consecutive stories
+  in the combined episode video for pacing. Captions are timed with a
+  naive proportional estimate (not real forced alignment) -- see
+  `TODO.md`.
 
 ## Editorial Dashboard
 
@@ -223,6 +233,9 @@ dropped mid-session, not through automated verification alone.
 - **Approve / Reject** -- sets the episode's overall status. Doesn't
   hard-block on a failing QA result -- QA is surfaced prominently, but
   the human makes the final call.
+- **Episode JSON (audit)** -- the exact API response the page rendered
+  from, at the bottom of the Studio view: view, copy, or download it
+  (`episode_{id}.json`) for a paper trail independent of the UI.
 
 **The same actions as raw API calls** (for scripting, or anything the
 UI doesn't cover):
@@ -281,3 +294,14 @@ curl http://localhost:8000/api/v1/episodes/{episode_id}
 docker compose down       # stop, keep data
 docker compose down -v    # stop and wipe the database volume
 ```
+
+## Contributing / guardrails
+
+`CLAUDE.md` documents dev-environment gotchas and hard rules distilled
+from real bugs found in this project (script-clobbering, stale cached
+media, background-task status races, ffmpeg duration overrun, and
+more) -- read it before touching the content/video pipeline or
+dashboard. `.claude/skills/verify-episode/` and
+`.claude/agents/episode-verifier.md` codify the AV-sync/QA/idempotency
+checklist used to catch and verify those bugs, for reuse on future
+pipeline changes.

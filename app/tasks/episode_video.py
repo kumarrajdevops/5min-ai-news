@@ -6,6 +6,7 @@ from app.content.video_composer import (
     build_captions,
     compose_video,
     concat_videos,
+    generate_gap_clip,
     get_audio_duration_seconds,
 )
 from app.content.visual_generator import generate_branding_card, generate_card
@@ -44,6 +45,7 @@ def _produce_branding_clip(main_text: str, sub_text: str, narration_text: str, c
             audio_path=audio_path,
             captions_path=captions_path,
             output_path=video_path,
+            duration_seconds=duration,
         )
 
         return video_path
@@ -122,6 +124,7 @@ def _produce_story_content(db, story: Story, content: StoryContent) -> bool:
             audio_path=Path(content.audio_path),
             captions_path=captions_path,
             output_path=video_path,
+            duration_seconds=content.audio_duration_seconds,
         )
 
         content.captions_path = str(captions_path)
@@ -134,6 +137,20 @@ def _produce_story_content(db, story: Story, content: StoryContent) -> bool:
         return False
 
     return True
+
+
+# A 2s silent black clip inserted between consecutive story segments
+# in the combined episode video, purely for pacing -- content-
+# independent, so generated once and reused across every episode
+# rather than regenerated per /produce call.
+GAP_DURATION_SECONDS = 0.5
+GAP_CLIP_PATH = MEDIA_ROOT / "videos" / "_story_gap_0_5s.mp4"
+
+
+def _get_gap_clip() -> Path:
+    if not GAP_CLIP_PATH.exists():
+        generate_gap_clip(GAP_DURATION_SECONDS, GAP_CLIP_PATH)
+    return GAP_CLIP_PATH
 
 
 @celery_app.task
@@ -199,22 +216,29 @@ def produce_episode_video(episode_id: int) -> dict:
         if intro_path:
             video_paths.append(intro_path)
 
+        added_first_story_clip = False
+
         for episode_story, story in rows:
             content = get_or_create_content(db, story.id)
 
             if content.status == "video_ready" and content.video_path:
                 skipped_existing += 1
-                video_paths.append(Path(content.video_path))
-                continue
-
-            ok = _produce_story_content(db, story, content)
-
-            if ok:
+                clip_path = Path(content.video_path)
+            elif _produce_story_content(db, story, content):
                 succeeded += 1
-                video_paths.append(Path(content.video_path))
+                clip_path = Path(content.video_path)
             else:
                 failed += 1
                 print(f"[episode_video] Story {story.id} failed, excluded from episode {episode_id}")
+                continue
+
+            # A gap goes *between* stories only -- never before the
+            # first one (right after the intro) and never doubled up
+            # around a story that got excluded above.
+            if added_first_story_clip:
+                video_paths.append(_get_gap_clip())
+            video_paths.append(clip_path)
+            added_first_story_clip = True
 
         outro_path = _produce_branding_clip(
             main_text="That's all for today's AI Daily 25.",

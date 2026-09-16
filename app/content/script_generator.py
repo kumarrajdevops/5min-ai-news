@@ -13,6 +13,16 @@ MAX_SUMMARY_SENTENCES = 3
 # thought -- keeping it produces a summary that trails off mid-idea.
 TRUNCATION_MARKER_RE = re.compile(r"[\[\(]?\s*(?:\.\.\.|…)\s*[\]\)]?\s*$")
 
+# Some feeds' excerpts mix a newsletter/subscription pitch in with the
+# actual story text (e.g. "To get stories like this in your inbox
+# first, sign up here." or "Subscribe to the MacRumors YouTube channel
+# for more videos.") -- drop any sentence that's clearly a promotional
+# call-to-action rather than real story content, same rationale as
+# TRUNCATION_MARKER_RE above.
+PROMO_SENTENCE_RE = re.compile(
+    r"\b(sign up|sign in|subscribe|newsletter|log in)\b", re.IGNORECASE
+)
+
 
 def _strip_html(text: str) -> str:
     # RSS summaries are frequently HTML fragments (<p>, <a>, entities).
@@ -49,6 +59,10 @@ def build_summary(
     # cutoff) rather than read it aloud mid-thought.
     if sentences and TRUNCATION_MARKER_RE.search(sentences[-1]):
         sentences = sentences[:-1]
+
+    # Drop promotional/newsletter-pitch sentences before truncating to
+    # max_sentences, so a promo line doesn't crowd out real content.
+    sentences = [s for s in sentences if not PROMO_SENTENCE_RE.search(s)]
 
     if not sentences:
         return "No summary was available from the source."

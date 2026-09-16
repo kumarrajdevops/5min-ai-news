@@ -256,12 +256,56 @@ function renderStudioLayout(ep) {
         ${renderQAPanelHtml(ep)}
       </div>
     </div>
+
+    <div class="panel">
+      <div class="json-audit-header">
+        <h2>Episode JSON (audit)</h2>
+        <div class="json-audit-actions">
+          <button class="btn" id="json-copy-btn" type="button">Copy JSON</button>
+          <button class="btn" id="json-download-btn" type="button">Download JSON</button>
+        </div>
+      </div>
+      <pre class="json-audit-pre"><code>${escapeHtml(JSON.stringify(ep, null, 2))}</code></pre>
+    </div>
   `;
 
   renderStoryList("primary-list", ep.primary, ep, true);
   renderStoryList("backup-list", ep.backup, ep, false);
   wireDragAndDrop(ep);
+  wireJsonAudit(ep);
   wireHeaderButtons(ep);
+}
+
+// Raw episode JSON at the bottom of the Studio view, for audit --
+// exactly what the API returned (same object the whole page rendered
+// from), copyable and downloadable so an editor can attach it to a
+// ticket or diff it against a later state.
+function wireJsonAudit(ep) {
+  const jsonText = JSON.stringify(ep, null, 2);
+
+  const copyBtn = document.getElementById("json-copy-btn");
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(jsonText);
+      const original = copyBtn.textContent;
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = original; }, 1500);
+    } catch (err) {
+      alert("Couldn't copy automatically -- select the text in the box and copy manually.");
+    }
+  });
+
+  document.getElementById("json-download-btn").addEventListener("click", () => {
+    const blob = new Blob([jsonText], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `episode_${ep.episode_id}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
 }
 
 function renderQAPanelHtml(ep) {
@@ -286,12 +330,33 @@ function renderQAPanelHtml(ep) {
   return `<ol class="qa-list">${rows}</ol>`;
 }
 
+// Matches GAP_DURATION_SECONDS in app/tasks/episode_video.py -- a
+// silent 2s clip is inserted between consecutive *produced* story
+// segments in the combined video, so this offset calculation has to
+// count those gaps too or "jump to here" drifts out of sync later
+// into the episode, same class of bug as the AV-duration mismatch
+// that motivated adding the gaps in the first place.
+const STORY_GAP_SECONDS = 0.5;
+
 function computeStartOffset(ep, targetStoryId) {
   let offset = ep.intro_duration_seconds || 0;
+  let addedFirst = false;
+
   for (const s of ep.primary) {
+    // A story with no audio_duration_seconds never reached
+    // video_ready and was excluded from the concatenated video
+    // entirely -- it occupies no time and gets no gap.
+    const included = !!s.audio_duration_seconds;
+
+    if (included && addedFirst) offset += STORY_GAP_SECONDS;
     if (s.story_id === targetStoryId) return offset;
-    offset += s.audio_duration_seconds || 0;
+
+    if (included) {
+      offset += s.audio_duration_seconds;
+      addedFirst = true;
+    }
   }
+
   return null;
 }
 

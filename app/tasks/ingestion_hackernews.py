@@ -6,6 +6,7 @@ from app.config import settings  # Application configuration
 from app.db import SessionLocal  # PostgreSQL database session
 from app.filters.ai_relevance import calculate_ai_relevance  # AI relevance filter
 from app.models import Story  # Story database model
+from app.sources.article_fetcher import fetch_article_summary  # Real article summary for link-posts
 from app.sources.hackernews_api import fetch_ai_stories  # Hacker News fetcher
 from app.sources.publisher_resolver import resolve_publisher  # Real publisher from URL
 from app.tasks.dedup import deduplicate_new_stories  # Duplicate-story grouping
@@ -50,6 +51,18 @@ def _build_summary(hit: dict) -> str:
     story_text = hit.get("story_text")
     if story_text:
         return story_text
+
+    # Link posts: HN's own API has no article content, only submission
+    # metadata -- try fetching the actual linked page for a real
+    # summary before falling back to points/comments (which carries no
+    # information about what the story is actually about). Only
+    # attempted for a real external link, not the synthetic HN
+    # discussion permalink used as a fallback url for self-posts.
+    link = hit.get("url")
+    if link:
+        fetched = fetch_article_summary(link)
+        if fetched:
+            return fetched
 
     points = hit.get("points", 0)
     num_comments = hit.get("num_comments", 0)

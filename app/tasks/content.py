@@ -193,6 +193,7 @@ def compose_video_task(story_id: int) -> dict:
                 audio_path=Path(content.audio_path),
                 captions_path=captions_path,
                 output_path=video_path,
+                duration_seconds=content.audio_duration_seconds,
             )
 
             content.captions_path = str(captions_path)
