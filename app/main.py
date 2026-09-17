@@ -744,6 +744,7 @@ def update_story_content(story_id: int, body: StoryContentUpdate):
         content.status = "script_ready"
         content.audio_path = None
         content.audio_duration_seconds = None
+        content.caption_segments = None
         content.image_path = None
         content.captions_path = None
         content.video_path = None

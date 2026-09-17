@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,11 +34,11 @@ def _produce_branding_clip(main_text: str, sub_text: str, narration_text: str, c
         generate_branding_card(main_text, sub_text, image_path)
 
         audio_path = MEDIA_ROOT / "audio" / f"{clip_id}.mp3"
-        synthesize_voice(narration_text, audio_path)
+        segments = synthesize_voice(narration_text, audio_path)
         duration = get_audio_duration_seconds(audio_path)
 
         captions_path = MEDIA_ROOT / "captions" / f"{clip_id}.srt"
-        build_captions(narration_text, duration, captions_path)
+        build_captions(segments, captions_path)
 
         video_path = MEDIA_ROOT / "videos" / f"{clip_id}.mp4"
         compose_video(
@@ -93,9 +94,10 @@ def _produce_story_content(db, story: Story, content: StoryContent) -> bool:
 
     try:
         audio_path = MEDIA_ROOT / "audio" / f"{story.id}.mp3"
-        synthesize_voice(content.script_text, audio_path)
+        segments = synthesize_voice(content.script_text, audio_path)
         content.audio_path = str(audio_path)
         content.audio_duration_seconds = get_audio_duration_seconds(audio_path)
+        content.caption_segments = json.dumps(segments)
         content.status = "voice_ready"
         content.error_message = None
         db.commit()
@@ -116,7 +118,8 @@ def _produce_story_content(db, story: Story, content: StoryContent) -> bool:
 
     try:
         captions_path = MEDIA_ROOT / "captions" / f"{story.id}.srt"
-        build_captions(content.script_text, content.audio_duration_seconds or 0.0, captions_path)
+        segments = json.loads(content.caption_segments) if content.caption_segments else []
+        build_captions(segments, captions_path)
 
         video_path = MEDIA_ROOT / "videos" / f"{story.id}.mp4"
         compose_video(

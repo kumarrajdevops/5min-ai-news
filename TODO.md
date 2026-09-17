@@ -1035,22 +1035,79 @@ auto-blocking).
       parameter, see part 24's "not covered by this pass" note).
       Verified live/manually instead, per above.
 
+### This session — 2026-09-17, part 27 (wire QA's source_verification check to the Verification Engine)
+
+- [x] Surfaced during a live dashboard click-through (not a fresh
+      audit): `app/qa/video_qa.py`'s `source_verification` check still
+      hardcoded `passed: None` / "not implemented -- no Verification
+      Engine exists yet", stale since part 25 actually built the
+      Verification Engine. Reported it rather than fixing silently in
+      the same pass, per the project's "don't silently expand scope"
+      rule; fixed once asked.
+- [x] Fixed by checking each included story's real
+      `Story.verification_status`: `passed = (unverified count == 0)`,
+      same "all N have X" pattern as `source_links`/`captions_present`/
+      `audio_present`. Non-gating, same as `duration_target` -- QA
+      already doesn't block `/approve` (see `main.py`), so a real FAIL
+      here is an honest signal, not a new hard gate.
+- [x] **Verified against the live stack**: restarted `worker`, re-ran
+      `/qa` on episode #9 -- report now reads `FAIL -- source_verification
+      -- 15 unverified stories included: [97, 98, 92, ...]` with real
+      story IDs matching the unverified pills already shown in the
+      dashboard's story list, instead of the old permanent SKIP. Full
+      `pytest` suite (80 tests) still passes.
+
+### This session — 2026-09-17, part 28 (real caption timing via edge-tts, not a character-count estimate)
+
+- [x] `build_captions()` (`app/content/video_composer.py`) used to
+      allocate each sentence a slice of the total audio duration
+      proportional to its character count -- a guess, not a
+      measurement, and the known, already-documented reason captions
+      could drift on longer/uneven sentences.
+- [x] Fixed at the source instead of improving the guess: `edge-tts`
+      (the one real TTS model in this pipeline) already reports exact
+      per-sentence timing while it synthesizes, via
+      `Communicate(..., boundary="SentenceBoundary").stream()` --
+      `{"offset", "duration"}` in 100-ns ticks per sentence. No new
+      dependency; the data was already there, just not being read.
+      `synthesize_voice()` (`app/content/voice_generator.py`) now
+      streams (instead of `.save()`) to capture these boundaries
+      alongside the audio bytes, converts ticks to seconds, and returns
+      them as `[{"text", "start", "end"}, ...]`. `build_captions()` now
+      just writes that real timing to `.srt` -- no estimation logic
+      left at all.
+- [x] New `StoryContent.caption_segments` column (migration
+      `f9c2a5e8d371`) persists the real timing between the voice stage
+      and the video stage, since those are separate Celery tasks (in
+      `app/tasks/content.py`'s per-story chain) that can run at
+      different times -- same reason `audio_path`/`captions_path` are
+      already persisted rather than passed in memory. Also cleared
+      alongside `audio_path`/`captions_path`/etc. in `PATCH
+      /stories/{id}/content`'s edit-panel reset, so an edited script
+      regenerates real timing too, not stale segments from the old text.
+      Both content pipelines updated to match --
+      `app/tasks/content.py`'s Celery-chained per-story stages AND
+      `app/tasks/episode_video.py`'s synchronous per-episode production
+      (including the intro/outro branding clips).
+- [x] **Verified against the live stack**: reset story #121's content
+      via the edit-panel endpoint, re-triggered `/produce`, confirmed
+      `caption_segments` in the DB holds real per-sentence
+      `start`/`end` values, the resulting `.srt` file's timestamps
+      match them exactly, and `ffprobe`'d the composed video's duration
+      (9.88s) against the real audio duration (9.888s) -- within the
+      established one-frame tolerance. Added `tests/test_build_captions.py`
+      (2 new tests) covering the exact "short sentence then a much
+      longer one" case that broke the old proportional estimate. Full
+      `pytest` suite: 82 tests, all passing.
+
 ## Known issues / follow-ups
 
-- [ ] Automated QA's `source_verification` check (`app/qa/video_qa.py`)
-      still always reports `passed: None`/"not implemented" -- it
-      predates the Verification Engine (part 25) and hasn't been wired
-      up to actually read `Story.verification_status` for the episode's
-      stories yet. A real, low-effort follow-up now that the data
-      exists (e.g. report the verified/unverified breakdown as
-      informational, matching this check's existing non-gating
-      `passed: None` pattern) -- not done in part 25's pass since it
-      wasn't asked for, noted here rather than silently left stale.
-- [ ] Caption timing in `compose_video_task` is a naive proportional estimate
-      (sentence character-count share of total audio duration), not real
-      forced alignment against the TTS engine's actual word timings --
-      captions will drift out of sync on longer/uneven sentences. Real
-      alignment is future work.
+- [x] ~~Automated QA's `source_verification` check always reports
+      `passed: None`/"not implemented"~~ -- wired up to
+      `Story.verification_status`, see "part 27" above.
+- [x] ~~Caption timing in `compose_video_task` is a naive proportional
+      estimate~~ -- replaced with real per-sentence timing from
+      edge-tts, see "part 28" above.
 - [x] ~~Composed video duration doesn't exactly match the source audio
       duration~~ -- root-caused and fixed, see "part 19" above (was
       `-shortest` overrunning by 1-2s/clip, not simple rounding;
@@ -1100,8 +1157,13 @@ original `project.md` description was broader than what's built:
       no screenshots, no motion graphics, no background music.
 - [~] Video Composition -- voice + visuals + captions + episode-level
       branding (intro/outro) all working. No avatar, no transitions.
-- [ ] Automated Video QA (story count, AI-only, sources, captions, audio, duration)
-- [ ] Final Human Approval workflow
+- [x] Automated Video QA -- 8 checks (story count, AI-only, source
+      verification, source links, captions, audio, video integrity,
+      duration), see "part 9" and "part 27" above. Soft signal only,
+      same as Verification Engine -- never blocks approval.
+- [x] Final Human Approval workflow -- Approve/Reject buttons in the
+      dashboard, see "part 10" onward above. Manual only, no
+      auto-approval, per the architecture.
 - [ ] Publishing Worker (YouTube + Instagram)
 - [ ] Analytics Worker (views, retention, watch time, shares, likes/comments, followers)
 - [ ] Notification Worker (failure alerts)

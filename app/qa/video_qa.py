@@ -49,14 +49,20 @@ def run_qa_checks(episode, story_rows: list[tuple], video_path: Path | None) -> 
         ),
     })
 
-    # 3. Verified sources -- project.md's architecture calls for a
-    # Verification Engine (cross-source confirmation of facts) ahead
-    # of ranking. That's not built yet (see TODO.md) -- this check
-    # honestly reports "not implemented" rather than faking a pass.
+    # 3. Verified sources -- the Verification Engine (app/verification/
+    # engine.py) marks each story "verified" (cross-source confirmation
+    # or a primary/official source) or "unverified" ahead of ranking.
+    # Same as duration_target below: this is an honest report, not a
+    # gate -- QA never blocks approval (see main.py), and an episode
+    # with unverified stories can still legitimately be approved.
+    unverified = [s.id for _, s, _ in story_rows if s.verification_status != "verified"]
     checks.append({
         "check": "source_verification",
-        "passed": None,
-        "detail": "not implemented -- no Verification Engine exists yet, see TODO.md",
+        "passed": len(unverified) == 0,
+        "detail": (
+            f"all {total} stories verified" if not unverified
+            else f"{len(unverified)} unverified stories included: {unverified}"
+        ),
     })
 
     # 4. Source links -- every included story has a real url.

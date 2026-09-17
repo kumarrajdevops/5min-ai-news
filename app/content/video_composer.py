@@ -1,5 +1,4 @@
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -60,38 +59,27 @@ def _format_srt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def build_captions(script_text: str, duration_seconds: float, output_path: Path) -> None:
+def build_captions(segments: list[dict], output_path: Path) -> None:
     """
-    Write an .srt caption file for `script_text`, timed against
-    `duration_seconds`.
-
-    This is a naive, proportional estimate: sentences are allocated a
-    slice of the total audio duration proportional to their character
-    count. It is NOT real forced alignment against the TTS engine's
-    actual word timings -- good enough to burn in readable captions
-    for this MVP, not frame-accurate. Real alignment is future work.
+    Write an .srt caption file from `segments` -- real per-sentence
+    timing reported by edge-tts during synthesis (see
+    app/content/voice_generator.py's synthesize_voice()), not an
+    estimate. Each segment's start/end already reflects exactly when
+    that sentence is spoken in the audio, so captions no longer drift
+    on longer/uneven sentences the way a proportional character-count
+    split did.
     """
-
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", script_text) if s.strip()]
-    if not sentences:
-        sentences = [script_text]
-
-    total_chars = sum(len(s) for s in sentences) or 1
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    cursor = 0.0
     with open(output_path, "w", encoding="utf-8") as f:
-        for index, sentence in enumerate(sentences, start=1):
-            share = len(sentence) / total_chars
-            segment_duration = duration_seconds * share
-            start = cursor
-            end = min(duration_seconds, cursor + segment_duration)
-            cursor = end
-
+        for index, segment in enumerate(segments, start=1):
             f.write(f"{index}\n")
-            f.write(f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}\n")
-            f.write(f"{sentence}\n\n")
+            f.write(
+                f"{_format_srt_timestamp(segment['start'])} --> "
+                f"{_format_srt_timestamp(segment['end'])}\n"
+            )
+            f.write(f"{segment['text']}\n\n")
 
 
 def generate_gap_clip(duration_seconds: float, output_path: Path) -> None:

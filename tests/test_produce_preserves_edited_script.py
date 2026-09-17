@@ -59,6 +59,7 @@ def test_produce_story_content_preserves_a_human_edited_script(db_session, monke
 
     def fake_synthesize_voice(text, output_path):
         voice_calls.append(text)
+        return []
 
     def fake_generate_card(headline, source_name, output_path):
         visual_calls.append(headline)
@@ -66,7 +67,7 @@ def test_produce_story_content_preserves_a_human_edited_script(db_session, monke
     def fake_get_audio_duration_seconds(path):
         return 12.5
 
-    def fake_build_captions(script_text, duration, output_path):
+    def fake_build_captions(segments, output_path):
         pass
 
     def fake_compose_video(**kwargs):
@@ -113,10 +114,10 @@ def test_produce_story_content_generates_script_for_brand_new_story(db_session, 
         return {"headline": "Generated headline", "summary": "Generated summary", "script_text": "Generated script"}
 
     monkeypatch.setattr(episode_video, "generate_script", fake_generate_script)
-    monkeypatch.setattr(episode_video, "synthesize_voice", lambda text, output_path: None)
+    monkeypatch.setattr(episode_video, "synthesize_voice", lambda text, output_path: [])
     monkeypatch.setattr(episode_video, "generate_card", lambda headline, source_name, output_path: None)
     monkeypatch.setattr(episode_video, "get_audio_duration_seconds", lambda path: 5.0)
-    monkeypatch.setattr(episode_video, "build_captions", lambda script_text, duration, output_path: None)
+    monkeypatch.setattr(episode_video, "build_captions", lambda segments, output_path: None)
     monkeypatch.setattr(episode_video, "compose_video", lambda **kwargs: None)
 
     ok = episode_video._produce_story_content(db_session, story, content)
@@ -152,10 +153,10 @@ def test_produce_story_content_retry_after_video_failure_does_not_reregenerate_s
         "generate_script",
         lambda title, raw_summary: generate_script_calls.append(1) or {},
     )
-    monkeypatch.setattr(episode_video, "synthesize_voice", lambda text, output_path: None)
+    monkeypatch.setattr(episode_video, "synthesize_voice", lambda text, output_path: [])
     monkeypatch.setattr(episode_video, "generate_card", lambda headline, source_name, output_path: None)
     monkeypatch.setattr(episode_video, "get_audio_duration_seconds", lambda path: 8.0)
-    monkeypatch.setattr(episode_video, "build_captions", lambda script_text, duration, output_path: None)
+    monkeypatch.setattr(episode_video, "build_captions", lambda segments, output_path: None)
     monkeypatch.setattr(episode_video, "compose_video", lambda **kwargs: None)
 
     ok = episode_video._produce_story_content(db_session, story, content)

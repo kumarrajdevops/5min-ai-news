@@ -273,6 +273,13 @@ class StoryContent(Base):
     audio_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     audio_duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
 
+    # Real per-sentence timing reported by edge-tts during synthesis
+    # (JSON list of {"text", "start", "end"} in seconds) -- captured at
+    # the voice stage, consumed at the video stage to burn in
+    # frame-accurate captions instead of a proportional character-count
+    # estimate. See app/content/voice_generator.py.
+    caption_segments: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     captions_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     video_path: Mapped[str | None] = mapped_column(Text, nullable=True)

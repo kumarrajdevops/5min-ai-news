@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from app.content.script_generator import generate_script
@@ -108,11 +109,12 @@ def generate_voice_task(story_id: int) -> dict:
 
         try:
             audio_path = MEDIA_ROOT / "audio" / f"{story_id}.mp3"
-            synthesize_voice(content.script_text, audio_path)
+            segments = synthesize_voice(content.script_text, audio_path)
             duration = get_audio_duration_seconds(audio_path)
 
             content.audio_path = str(audio_path)
             content.audio_duration_seconds = duration
+            content.caption_segments = json.dumps(segments)
             content.status = "voice_ready"
             content.error_message = None
             db.commit()
@@ -165,8 +167,9 @@ def generate_visual_task(story_id: int) -> dict:
 @celery_app.task
 def compose_video_task(story_id: int) -> dict:
     """
-    Stage 4 of 4: burn proportional captions in and compose the final
-    video (image + audio + captions) via ffmpeg. Terminal stage.
+    Stage 4 of 4: burn in captions (real per-sentence timing captured
+    at the voice stage) and compose the final video (image + audio +
+    captions) via ffmpeg. Terminal stage.
     """
 
     with SessionLocal() as db:
@@ -181,11 +184,8 @@ def compose_video_task(story_id: int) -> dict:
 
         try:
             captions_path = MEDIA_ROOT / "captions" / f"{story_id}.srt"
-            build_captions(
-                content.script_text,
-                content.audio_duration_seconds or 0.0,
-                captions_path,
-            )
+            segments = json.loads(content.caption_segments) if content.caption_segments else []
+            build_captions(segments, captions_path)
 
             video_path = MEDIA_ROOT / "videos" / f"{story_id}.mp4"
             compose_video(
