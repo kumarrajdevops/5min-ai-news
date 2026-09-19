@@ -138,11 +138,11 @@ table.episode-list tr.row-link:hover { background: var(--surface-2); }
   white-space: nowrap;
 }
 
-.pill.pass, .pill.passed, .pill.ready, .pill.approved, .pill.video_ready, .pill.verified {
+.pill.pass, .pill.passed, .pill.ready, .pill.approved, .pill.video_ready, .pill.verified, .pill.published {
   background: var(--pass-bg); color: var(--pass);
 }
 .pill.fail, .pill.failed, .pill.rejected { background: var(--fail-bg); color: var(--fail); }
-.pill.skip, .pill.pending, .pill.draft, .pill.producing, .pill.script_ready, .pill.voice_ready, .pill.visual_ready, .pill.unverified {
+.pill.skip, .pill.pending, .pill.draft, .pill.producing, .pill.script_ready, .pill.voice_ready, .pill.visual_ready, .pill.unverified, .pill.not_published, .pill.publishing {
   background: var(--skip-bg); color: var(--skip);
 }
 
@@ -182,7 +182,8 @@ table.episode-list tr.row-link:hover { background: var(--surface-2); }
 }
 
 .studio-header h1 { font-size: 24px; margin: 0 0 6px; }
-.studio-header .meta { color: var(--text-muted); font-size: 14px; }
+.studio-header .meta { color: var(--text-muted); font-size: 14px; margin: 6px 0 0; }
+.studio-header .meta.publish-error { color: var(--fail); }
 
 .studio-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 

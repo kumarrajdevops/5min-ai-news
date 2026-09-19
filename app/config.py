@@ -18,6 +18,25 @@ class Settings(BaseSettings):
     # Daily news collection window
     news_window_hours: int = 22
 
+    # YouTube Data API v3 credentials for the Publishing Worker (see
+    # app/publishing/youtube_publisher.py). None until a real Google
+    # Cloud OAuth client + one-time consent flow exist -- see
+    # app/scripts/youtube_oauth_setup.py and README.md's Publishing
+    # section for setup steps. Deliberately optional (not required to
+    # run the rest of the pipeline) so dev/testing never needs a real
+    # YouTube account.
+    youtube_client_id: str | None = None
+    youtube_client_secret: str | None = None
+    youtube_refresh_token: str | None = None
+
+    @property
+    def youtube_configured(self) -> bool:
+        return bool(
+            self.youtube_client_id
+            and self.youtube_client_secret
+            and self.youtube_refresh_token
+        )
+
     # Build the PostgreSQL SQLAlchemy URL.
     # The project uses psycopg (PostgreSQL driver version 3).
     @property

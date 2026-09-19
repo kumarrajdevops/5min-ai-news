@@ -110,6 +110,17 @@ Don't re-diagnose from scratch.
 - Postgres credentials are `ai_news`/`ai_news` (db `ai_news`), not the
   `postgres` default: `docker exec 5min-ai-news-postgres-1 psql -U
   ai_news -d ai_news`.
+- A brand-new `app/tasks/*.py` module must be added to `include=[...]`
+  in `app/worker/celery_app.py`, or `.delay()` silently queues a task
+  the worker never picks up (confirmed live when the Publishing
+  Worker's task didn't appear in the worker's `[tasks]` startup log
+  until this was fixed). Editing an *existing* task file doesn't need
+  this -- only a new module.
+- `requirements-dev.txt` (pytest) is not installed in the built image
+  by design (keeps prod lean) -- `docker compose build` alone wipes any
+  ad hoc `pip install` done in a running container. After a rebuild,
+  re-run `pip install -r requirements-dev.txt` inside the `api`
+  container before `pytest` works again.
 - On Windows/Git Bash, prefix `docker exec ... ffprobe /app/media/...`
   style commands with `MSYS_NO_PATHCONV=1` or the leading `/` gets
   mangled into a Windows path.

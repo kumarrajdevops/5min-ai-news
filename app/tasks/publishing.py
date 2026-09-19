@@ -1,0 +1,70 @@
+from datetime import datetime, timezone
+from pathlib import Path
+
+from app.db import SessionLocal
+from app.models import Episode, EpisodeStory, Story
+from app.publishing.youtube_publisher import build_video_metadata, upload_video
+from app.worker.celery_app import celery_app
+
+
+@celery_app.task
+def publish_episode_to_youtube(episode_id: int) -> dict:
+    """
+    Upload an already-approved, already-produced episode's combined
+    video to YouTube (see app/publishing/youtube_publisher.py).
+
+    Does not produce or approve anything itself -- POST
+    /episodes/{id}/publish (app/main.py) already validated
+    status == "approved" and video_status == "ready" and flipped
+    publish_status to "publishing" synchronously before queuing this
+    task, same status-flip-in-the-endpoint pattern as Produce/QA.
+    """
+
+    with SessionLocal() as db:
+        episode = db.get(Episode, episode_id)
+
+        if episode is None:
+            return {"episode_id": episode_id, "status": "failed", "error": "Episode not found"}
+
+        try:
+            rows = (
+                db.query(EpisodeStory, Story)
+                .join(Story, EpisodeStory.story_id == Story.id)
+                .filter(
+                    EpisodeStory.episode_id == episode_id,
+                    EpisodeStory.selection_status == "primary",
+                )
+                .order_by(EpisodeStory.rank_position.asc())
+                .all()
+            )
+
+            stories = [
+                {"headline": story.title, "source_name": story.source_name, "url": story.url}
+                for _episode_story, story in rows
+            ]
+
+            metadata = build_video_metadata(episode.run_date, stories)
+
+            result = upload_video(
+                video_path=Path(episode.video_path),
+                title=metadata["title"],
+                description=metadata["description"],
+                tags=metadata["tags"],
+            )
+
+            episode.publish_status = "published"
+            episode.youtube_video_id = result["video_id"]
+            episode.youtube_url = result["url"]
+            episode.published_at = datetime.now(timezone.utc)
+            episode.publish_error = None
+            db.commit()
+
+        except Exception as exc:
+            episode.publish_status = "failed"
+            episode.publish_error = str(exc)
+            db.commit()
+            print(f"[publishing] Episode {episode_id} publish failed: {exc}")
+            return {"episode_id": episode_id, "status": "failed", "error": str(exc)}
+
+    print(f"[publishing] Episode {episode_id} published: {episode.youtube_url}")
+    return {"episode_id": episode_id, "status": "published", "youtube_url": episode.youtube_url}

@@ -1100,6 +1100,141 @@ auto-blocking).
       longer one" case that broke the old proportional estimate. Full
       `pytest` suite: 82 tests, all passing.
 
+### This session — 2026-09-18, part 29 (voice selection: sample every English edge-tts voice)
+
+- [x] User feedback: didn't like the current `en-US-GuyNeural` voice
+      and asked for a way to compare alternatives with actual audio
+      samples, not just names.
+- [x] Since edge-tts is free/local with no API key (see "No LLM in the
+      pipeline" in `README.md`), generated real samples rather than
+      guessing from voice names/tags: `edge_tts.list_voices()` returned
+      47 English voices (`en-US`, `en-GB`, `en-AU`, `en-CA`, `en-IN`,
+      `en-IE`, `en-NZ`, `en-NG`, `en-KE`, `en-PH`, `en-SG`, `en-ZA`,
+      `en-TZ`, `en-HK` locales). Synthesized the same two-sentence
+      realistic news script (styled on this session's actual episode
+      #9 headlines) through every one via `edge_tts.Communicate(...)`
+      directly (a one-off script, not routed through
+      `synthesize_voice()` since these are throwaway comparison
+      samples, not production content) into `media/voice_samples/`
+      (served automatically by the existing `/media` StaticFiles mount
+      -- no new endpoint needed), plus a generated `index.html` comparison
+      page with an `<audio>` player per voice, gender/locale/personality
+      tags, and shortlisted voices starred and sorted first.
+- [x] 46/47 succeeded; `en-IE-EmilyNeural` consistently failed
+      (`NoAudioReceived`) across 3 retries despite `list_voices()`
+      reporting `Status: GA` -- a real, service-side issue with that
+      one voice specifically (same "confirmed still blocked" pattern
+      as the VentureBeat RSS source), flagged as unavailable on the
+      comparison page rather than silently omitted or retried forever.
+- [x] User picked 3 shortlisted candidates from the first listening
+      pass to compare further: `en-US-AriaNeural`, `en-US-JennyNeural`,
+      `en-GB-RyanNeural`. Recorded in `README.md`'s Voice bullet as
+      "still under review" -- `VOICE_NAME` in
+      `app/content/voice_generator.py` deliberately left as
+      `en-US-GuyNeural` for now until a final pick is made; this is a
+      one-line change plus a full-episode re-verify when that happens
+      (see `verify-episode` skill).
+- [x] Also fixed a stale claim noticed in the same `README.md` section
+      while editing it: the Video bullet still said captions use "a
+      naive proportional estimate," which part 28 above already
+      replaced with real edge-tts sentence timing -- corrected in
+      place rather than left inconsistent with part 28's own entry.
+- [ ] The `media/voice_samples/` directory and its one-off generator
+      scripts are dev-only scratch artifacts (not committed to git,
+      not part of the production pipeline) -- fine to delete once a
+      final voice is chosen and confirmed working end-to-end.
+
+### This session — 2026-09-19, part 30 (Publishing Worker: YouTube, first pass)
+
+- [x] User decision (explicit, via three scoped questions): **YouTube
+      only** for now (Instagram later, as a second adapter); **no real
+      OAuth credentials yet** -- build the full integration
+      ready-to-plug-in rather than waiting; **manual "Publish" button**
+      only, never auto-cascading from Approve -- consistent with every
+      other stage in this pipeline (Produce/QA/Approve are all manual
+      triggers today).
+- [x] `app/publishing/youtube_publisher.py` (new): `build_video_metadata()`
+      is a pure function (title/description/tags from the episode's
+      real Top 25 -- headline + source + link per story), same
+      "keep the deterministic logic pure and testable" pattern as
+      `compute_total_score()`/`extract_facts()`. Guards YouTube's real
+      ~5000-char description cap defensively (a genuine external
+      constraint, not a theoretical one, given a full 25-story
+      episode). `upload_video()` does the actual YouTube Data API v3
+      resumable upload; raises `YouTubeNotConfigured` **before ever
+      touching the network** if `YOUTUBE_CLIENT_ID`/
+      `YOUTUBE_CLIENT_SECRET`/`YOUTUBE_REFRESH_TOKEN` aren't all set,
+      rather than surfacing an opaque auth error. Uploads start
+      **private** by default -- no visibility control in the dashboard
+      yet, so a human always makes it public/unlisted deliberately via
+      YouTube Studio, never automatically on first publish.
+- [x] `app/tasks/publishing.py` (new): `publish_episode_to_youtube`
+      Celery task, `app/scripts/youtube_oauth_setup.py` (new): one-time
+      interactive script (must run on a host with a real browser, not
+      in Docker) to obtain the refresh token, documented step-by-step
+      in `README.md`'s new Publishing section.
+- [x] New `Episode` fields (migration `a4d7c1e69f28`): `publish_status`
+      (not_published -> publishing -> published/failed),
+      `youtube_video_id`, `youtube_url`, `published_at`,
+      `publish_error`. New `POST /episodes/{id}/publish` endpoint --
+      400s if not `approved` or video not `ready`; flips
+      `publish_status` to `"publishing"` synchronously before queuing,
+      same race-avoidance reason as `trigger_episode_production()`.
+- [x] Dashboard: new "Publish to YouTube" button (relabels to "Retry
+      Publish" after a failure, "Published ✓" and disabled once
+      published -- re-publishing would create a real duplicate upload,
+      a genuinely hard-to-reverse external action, unlike everything
+      else this dashboard lets you redo freely), a `publish_status`
+      pill (studio header + episode list table's new "Publish"
+      column), a live elapsed-time indicator while publishing (same
+      pattern as Produce/QA polling), the resulting YouTube link once
+      published, and the failure reason inline in red once failed.
+- [x] New dependencies: `google-api-python-client`, `google-auth`,
+      `google-auth-oauthlib`, `google-auth-httplib2` -- the first
+      genuine exception to this project's "no API key required"
+      pipeline claim (see `README.md`'s No-LLM section), and
+      deliberately so: publishing to a real channel inherently needs a
+      real account, unlike every deterministic content-generation
+      stage before it.
+- [x] Real bug caught live, not by code review: the new task module
+      wasn't in `app/worker/celery_app.py`'s `include=[...]` list, so
+      `.delay()` silently queued a task the worker never picked up --
+      caught by checking the worker's `[tasks]` startup log before
+      declaring this done (per this repo's "verify against the live
+      system" rule), not assumed from the code looking correct. Fixed
+      and added as a new `CLAUDE.md` dev-environment gotcha so it isn't
+      rediscovered next time a new task module is added.
+- [x] **Verified against the live stack**: rebuilt the `api`/`worker`
+      images (new deps installed cleanly), applied the migration,
+      confirmed the worker's `[tasks]` log lists
+      `app.tasks.publishing.publish_episode_to_youtube`. Real endpoint
+      test: `/publish` on a **non-approved** episode (#10) correctly
+      400s ("Episode must be approved before publishing"); `/publish`
+      on an **approved, video-ready** episode (#9) correctly queues,
+      runs, and fails fast with the exact `YouTubeNotConfigured`
+      message (no real credentials exist yet -- this is the accurate
+      current state, not a bug), setting `publish_status = "failed"`
+      and `publish_error` in the DB. Confirmed the dashboard renders
+      all of this correctly in a real browser: the red error banner,
+      the "failed" pill, the "Retry Publish" button relabel, and the
+      new episode-list "Publish" column across every episode's real
+      status. Added `tests/test_youtube_publisher.py` (3 new tests) for
+      the pure metadata builder (including the description-truncation
+      edge case) and the fail-fast credentials guard -- the full Celery
+      task itself is intentionally not unit tested, same accepted gap
+      as `run_ranking_selection`/`run_episode_qa` (opens its own
+      `SessionLocal()`; verified live instead, per above). Full
+      `pytest` suite: 85 tests, all passing.
+- [ ] Not yet tested against a real YouTube account -- genuinely
+      blocked on the user creating a real Google Cloud OAuth client
+      and running the one-time setup script; the code path beyond
+      `YouTubeNotConfigured` (the actual upload, response parsing,
+      real quota/auth-error handling) is unverified until then.
+- [ ] Instagram publishing, a dashboard visibility control (private/
+      unlisted/public choice at publish time), and multi-platform
+      publish status are all deliberately out of scope for this first
+      pass -- see "Next up" below.
+
 ## Known issues / follow-ups
 
 - [x] ~~Automated QA's `source_verification` check always reports
@@ -1164,7 +1299,9 @@ original `project.md` description was broader than what's built:
 - [x] Final Human Approval workflow -- Approve/Reject buttons in the
       dashboard, see "part 10" onward above. Manual only, no
       auto-approval, per the architecture.
-- [ ] Publishing Worker (YouTube + Instagram)
+- [~] Publishing Worker -- YouTube built (see "part 30" above: manual
+      publish button, real API integration, untested against a real
+      account pending OAuth credentials). Instagram not started.
 - [ ] Analytics Worker (views, retention, watch time, shares, likes/comments, followers)
 - [ ] Notification Worker (failure alerts)
 - [ ] Optimization Engine (feed analytics back into ranking)

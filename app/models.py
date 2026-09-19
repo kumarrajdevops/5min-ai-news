@@ -190,6 +190,25 @@ class Episode(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Publishing Worker (YouTube, see app/publishing/youtube_publisher.py
+    # and app/tasks/publishing.py). not_published -> publishing ->
+    # published (or failed). Only reachable once status == "approved"
+    # -- enforced by POST /episodes/{id}/publish, not by this column.
+    publish_status: Mapped[str] = mapped_column(
+        String(50),
+        default="not_published",
+        nullable=False,
+    )
+
+    youtube_video_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    youtube_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    publish_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
 
 class EpisodeStory(Base):
     """

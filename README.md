@@ -268,15 +268,19 @@ All four stages are free/local, no API keys required:
   Promotional/newsletter-pitch sentences ("subscribe", "sign up",
   etc.) are filtered out of any summary before narration.
 - **Voice** -- [edge-tts](https://github.com/rany2/edge-tts) (free
-  Microsoft neural TTS, one branded voice for every story).
+  Microsoft neural TTS, one branded voice for every story). Current
+  voice: `en-US-GuyNeural`, still under review -- shortlisted
+  candidates being compared for the final pick: `en-US-AriaNeural`,
+  `en-US-JennyNeural`, `en-GB-RyanNeural` (see `TODO.md` for the full
+  sample-comparison process across edge-tts's ~46 English voices).
 - **Visual** -- a branded title card rendered with Pillow.
 - **Video** -- ffmpeg composes the image + audio + burned-in captions
   into an mp4, hard-capped to the real audio duration (`-t
   <duration>`, not just `-shortest` -- see `TODO.md` for why that
   matters). A silent 0.5s clip is inserted between consecutive stories
-  in the combined episode video for pacing. Captions are timed with a
-  naive proportional estimate (not real forced alignment) -- see
-  `TODO.md`.
+  in the combined episode video for pacing. Captions are timed with
+  edge-tts's own real per-sentence timing (`SentenceBoundary` events
+  captured during synthesis), not an estimate -- see `TODO.md`.
 
 ## Editorial Dashboard
 
@@ -364,9 +368,58 @@ curl -X POST http://localhost:8000/api/v1/episodes/{episode_id}/approve
 curl -X POST http://localhost:8000/api/v1/episodes/{episode_id}/reject
 ```
 
-YouTube/Instagram publishing, analytics, and the fuller Next.js-based
-vision from `dashboard-proposal.md` are a separate, later workstream
--- see `TODO.md`.
+Instagram publishing, analytics, and the fuller Next.js-based vision
+from `dashboard-proposal.md` are a separate, later workstream -- see
+`TODO.md`. YouTube publishing is built (see below).
+
+## Publishing (YouTube)
+
+A **Publish to YouTube** button appears in the Studio view, next to
+Approve/Reject -- manual only, same human-in-the-loop philosophy as
+every other stage here: publishing is the one action with a real,
+externally-visible side effect, so it never auto-cascades from
+Approve.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/episodes/{episode_id}/publish
+```
+
+Requires the episode to already be `approved` with a `ready` video (400
+otherwise). Uploads the real combined episode video via the YouTube
+Data API v3's resumable upload, with a title/description/tags built
+deterministically from the episode's actual Top 25 (headline + source
++ link per story, same pattern as everything else in this pipeline --
+see `build_video_metadata()` in `app/publishing/youtube_publisher.py`).
+New uploads default to **private** visibility -- there's no visibility
+control in the dashboard yet, so a human always makes a video
+public/unlisted deliberately via YouTube Studio afterward, never
+automatically on first publish.
+
+**Requires real Google OAuth credentials, which this project does not
+ship with** -- the one exception to "free/local, no API keys" (see
+above): publishing to a real channel inherently needs a real account.
+One-time setup:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create
+   a project, enable the **YouTube Data API v3**, configure an OAuth
+   consent screen, and create an **OAuth Client ID** of type
+   **Desktop app**.
+2. Put its client ID/secret in `.env` as `YOUTUBE_CLIENT_ID` /
+   `YOUTUBE_CLIENT_SECRET`.
+3. On your host machine (not inside Docker -- this needs a real
+   browser), run `python -m app.scripts.youtube_oauth_setup` once. It
+   opens a Google consent screen and prints a refresh token; add it to
+   `.env` as `YOUTUBE_REFRESH_TOKEN`.
+
+Until all three are set, `/publish` fails fast with a clear
+`YouTubeNotConfigured` error -- before ever touching the network --
+rather than an opaque auth failure. This is the project's actual
+current state: the integration is fully built and tested (title/
+description generation, the upload call, DB status tracking, dashboard
+polling UI) but has never run against a real YouTube account yet, since
+no credentials exist. Verified live end-to-end up to that boundary: a
+real `/publish` call on an approved episode correctly fails with the
+`YouTubeNotConfigured` message and sets `publish_status = "failed"`.
 
 ## Inspecting results
 
@@ -395,7 +448,7 @@ docker exec 5min-ai-news-api-1 pip install -r requirements-dev.txt
 docker exec -w /app 5min-ai-news-api-1 pytest
 ```
 
-80 tests, no running Postgres required -- DB-backed tests use an
+85 tests, no running Postgres required -- DB-backed tests use an
 in-memory SQLite database (`tests/conftest.py`'s `db_session` fixture;
 every model uses portable column types, so this is a faithful stand-in)
 rather than the real dev database. Covers the deterministic filters

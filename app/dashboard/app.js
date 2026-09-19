@@ -186,6 +186,7 @@ async function renderEpisodeList() {
       <td><span class="pill ${ep.status}">${ep.status}</span></td>
       <td><span class="pill ${ep.video_status}">${ep.video_status}</span></td>
       <td><span class="pill ${ep.qa_status}">${ep.qa_status}</span></td>
+      <td><span class="pill ${ep.publish_status}">${ep.publish_status.replace("_", " ")}</span></td>
       <td>${ep.primary_count} / ${ep.backup_count}</td>
     </tr>
   `).join("");
@@ -194,7 +195,7 @@ async function renderEpisodeList() {
     <h1>Episodes</h1>
     <table class="episode-list">
       <thead>
-        <tr><th>ID</th><th>Run date</th><th>Status</th><th>Video</th><th>QA</th><th>Primary / Backup</th></tr>
+        <tr><th>ID</th><th>Run date</th><th>Status</th><th>Video</th><th>QA</th><th>Publish</th><th>Primary / Backup</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
@@ -254,7 +255,14 @@ function formatElapsed(ms) {
 
 function renderStudioLayout(ep) {
   const producing = ep.video_status === "producing";
+  const publishing = ep.publish_status === "publishing";
+  const published = ep.publish_status === "published";
   const qaStale = qaIsStale(ep);
+
+  let publishLabel = "Publish to YouTube";
+  if (publishing) publishLabel = "Publishing… 0:00";
+  else if (published) publishLabel = "Published ✓";
+  else if (ep.publish_status === "failed") publishLabel = "Retry Publish";
 
   app.innerHTML = `
     <div><a href="/dashboard/">&larr; All episodes</a></div>
@@ -267,13 +275,21 @@ function renderStudioLayout(ep) {
           &nbsp;<span class="pill ${ep.status}">${ep.status}</span>
           <span class="pill ${ep.video_status}">${ep.video_status}</span>
           <span class="pill ${ep.qa_status}">qa: ${ep.qa_status}</span>
+          <span class="pill ${ep.publish_status}">${ep.publish_status.replace("_", " ")}</span>
         </div>
+        ${ep.youtube_url
+          ? `<p class="meta">Published: <a href="${ep.youtube_url}" target="_blank" rel="noopener">${ep.youtube_url}</a></p>`
+          : ""}
+        ${ep.publish_status === "failed" && ep.publish_error
+          ? `<p class="meta publish-error">Publish failed: ${escapeHtml(ep.publish_error)}</p>`
+          : ""}
       </div>
       <div class="studio-actions">
         <button class="btn" id="btn-produce" type="button" ${producing ? "disabled" : ""}>${producing ? "Producing… 0:00" : "Produce"}</button>
         <button class="btn${qaStale ? " btn-warn" : ""}" id="btn-qa" type="button" ${producing ? "disabled" : ""}>${qaStale ? "Run QA ⚠ (stale)" : "Run QA"}</button>
         <button class="btn btn-pass" id="btn-approve" type="button">Approve</button>
         <button class="btn btn-fail" id="btn-reject" type="button">Reject</button>
+        <button class="btn" id="btn-publish" type="button" ${(producing || publishing || published) ? "disabled" : ""}>${publishLabel}</button>
       </div>
     </div>
 
@@ -574,6 +590,34 @@ function startQaPolling(ep, requestStartIso) {
   }, 1500);
 }
 
+// Publish uploads the real combined episode video, so it can take a
+// while (resumable upload, real network transfer) -- same live-timer
+// polling pattern as Produce, no safety timeout (an upload legitimately
+// can run several minutes for a 5-8 minute video on a slow connection).
+function startPublishPolling(ep, startTime) {
+  const publishBtn = document.getElementById("btn-publish");
+  if (!publishBtn) return;
+
+  publishBtn.disabled = true;
+
+  const tick = () => { publishBtn.textContent = `Publishing… ${formatElapsed(Date.now() - startTime)}`; };
+  tick();
+  const timerInterval = setInterval(tick, 1000);
+
+  const pollInterval = setInterval(async () => {
+    try {
+      const fresh = await apiGet(`/episodes/${ep.episode_id}`);
+      if (fresh.publish_status !== "publishing") {
+        clearInterval(timerInterval);
+        clearInterval(pollInterval);
+        await renderEpisodeStudio(ep.episode_id);
+      }
+    } catch (err) {
+      // Transient fetch error -- keep polling, next tick will retry.
+    }
+  }, 3000);
+}
+
 function wireHeaderButtons(ep) {
   document.getElementById("btn-produce").addEventListener("click", async () => {
     const startTime = Date.now();
@@ -601,6 +645,20 @@ function wireHeaderButtons(ep) {
     // is persisted), so it's an approximation, not exact wall time.
     startProducePolling(ep, Date.now());
   }
+
+  if (ep.publish_status === "publishing") {
+    startPublishPolling(ep, Date.now());
+  }
+
+  document.getElementById("btn-publish").addEventListener("click", async () => {
+    const startTime = Date.now();
+    try {
+      await apiPost(`/episodes/${ep.episode_id}/publish`);
+      startPublishPolling(ep, startTime);
+    } catch (err) {
+      alert("Failed to queue publish: " + err.message);
+    }
+  });
 
   document.getElementById("btn-approve").addEventListener("click", async () => {
     try {

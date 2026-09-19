@@ -16,6 +16,7 @@ from app.tasks.episode_qa import run_episode_qa
 from app.tasks.episode_video import produce_episode_video
 from app.tasks.ingestion import ingest_news
 from app.tasks.ingestion_hackernews import ingest_hackernews_stories
+from app.tasks.publishing import publish_episode_to_youtube
 from app.tasks.ranking import run_ranking_selection
 from app.tasks.verification import run_fact_extraction_and_verification
 
@@ -412,6 +413,45 @@ def reject_episode(episode_id: int):
     return {"episode_id": episode_id, "status": "rejected"}
 
 
+@app.post("/api/v1/episodes/{episode_id}/publish")
+def trigger_episode_publish(episode_id: int):
+    """
+    Publish an approved, produced episode to YouTube (see
+    app/tasks/publishing.py). Manual trigger only, matching Produce/
+    QA/Approve -- publishing is the one action in this pipeline with
+    a real, externally-visible side effect, so it deliberately never
+    auto-cascades from Approve.
+
+    Sets publish_status = "publishing" here, synchronously, same
+    race-avoidance reason as trigger_episode_production() above: a
+    poller can't otherwise distinguish "not started yet" from
+    "already finished".
+    """
+    with SessionLocal() as db:
+        episode = db.get(Episode, episode_id)
+
+        if episode is None:
+            raise HTTPException(status_code=404, detail="Episode not found.")
+
+        if episode.status != "approved":
+            raise HTTPException(
+                status_code=400,
+                detail="Episode must be approved before publishing.",
+            )
+
+        if episode.video_status != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail="Episode has no produced video yet -- run Produce first.",
+            )
+
+        episode.publish_status = "publishing"
+        db.commit()
+
+    task = publish_episode_to_youtube.delay(episode_id)
+    return {"episode_id": episode_id, "task_id": task.id, "status": "queued"}
+
+
 @app.get("/api/v1/episodes")
 def list_episodes():
     """
@@ -448,6 +488,7 @@ def list_episodes():
                 "status": episode.status,
                 "video_status": episode.video_status,
                 "qa_status": episode.qa_status,
+                "publish_status": episode.publish_status,
                 "created_at": episode.created_at,
                 "primary_count": primary_count,
                 "backup_count": backup_count,
@@ -590,6 +631,10 @@ def _serialize_episode(db, episode: Episode) -> dict:
         "qa_status": episode.qa_status,
         "qa_report": json.loads(episode.qa_report) if episode.qa_report else None,
         "qa_run_at": episode.qa_run_at,
+        "publish_status": episode.publish_status,
+        "youtube_url": episode.youtube_url,
+        "published_at": episode.published_at,
+        "publish_error": episode.publish_error,
         "primary": primary,
         "backup": backup,
     }

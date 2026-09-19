@@ -16,6 +16,7 @@ celery_app = Celery(
         "app.tasks.content",
         "app.tasks.episode_video",
         "app.tasks.episode_qa",
+        "app.tasks.publishing",
         "app.tasks.scheduled",
     ],
 )
